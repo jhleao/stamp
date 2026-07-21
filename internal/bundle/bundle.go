@@ -30,10 +30,14 @@ func PackFile(root, destination string) error {
 }
 
 func Pack(root string, destination io.Writer) error {
+	return PackWith(root, destination, nil)
+}
+
+func PackWith(root string, destination io.Writer, extra map[string][]byte) error {
 	archive := zip.NewWriter(destination)
 	defer archive.Close()
 	count := 0
-	return filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -85,7 +89,23 @@ func Pack(root string, destination io.Writer) error {
 			return copyErr
 		}
 		return closeErr
-	})
+	}); err != nil {
+		return err
+	}
+	for name, data := range extra {
+		clean := filepath.ToSlash(filepath.Clean(name))
+		if clean == "." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+			return fmt.Errorf("invalid extra archive path %q", name)
+		}
+		writer, err := archive.CreateHeader(&zip.FileHeader{Name: clean, Method: zip.Deflate})
+		if err != nil {
+			return err
+		}
+		if _, err := writer.Write(data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func UnpackFile(source, destination string) error {

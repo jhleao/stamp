@@ -19,3 +19,12 @@ The previous TypeScript implementation is preserved next to this repository as
 This is the deliberately smaller Go rewrite. See [DESIGN.md](DESIGN.md) for the
 scope and the decisions we are holding ourselves to.
 
+## Build
+
+```sh
+go build ./cmd/stamp
+go test ./...
+```
+
+Chrome, LibreOffice, and Pandoc provide the rendering wheels. Google Drive
+setup is documented in [docs/drive.md](docs/drive.md).

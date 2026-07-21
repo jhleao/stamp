@@ -1,0 +1,348 @@
+package drive
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/oauth2"
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
+)
+
+const keychainService = "sh.stamp.google-drive"
+
+type Client struct {
+	api      *drive.Service
+	identity string
+}
+
+type Item struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Folder  bool              `json:"folder"`
+	Version string            `json:"version,omitempty"`
+	WebURL  string            `json:"webUrl,omitempty"`
+	Parents []string          `json:"parents,omitempty"`
+	Props   map[string]string `json:"properties,omitempty"`
+}
+
+type OAuthFile struct {
+	Installed struct {
+		ClientID     string   `json:"client_id"`
+		ClientSecret string   `json:"client_secret"`
+		AuthURI      string   `json:"auth_uri"`
+		TokenURI     string   `json:"token_uri"`
+		RedirectURIs []string `json:"redirect_uris"`
+	} `json:"installed"`
+}
+
+func ConfigPath() string {
+	if path := os.Getenv("STAMP_GOOGLE_OAUTH_CONFIG"); path != "" {
+		return path
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Library", "Application Support", "Stamp", "google-oauth.json")
+}
+
+func Login(ctx context.Context) (string, error) {
+	config, clientID, err := oauthConfig()
+	if err != nil {
+		return "", err
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer listener.Close()
+	config.RedirectURL = "http://" + listener.Addr().String() + "/oauth/callback"
+	state := randomToken()
+	code := make(chan string, 1)
+	server := &http.Server{ReadHeaderTimeout: 5 * time.Second}
+	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/callback" || r.URL.Query().Get("state") != state {
+			http.Error(w, "Invalid Stamp login response.", http.StatusBadRequest)
+			return
+		}
+		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+			http.Error(w, oauthErr, http.StatusBadRequest)
+			return
+		}
+		select {
+		case code <- r.URL.Query().Get("code"):
+		default:
+		}
+		_, _ = io.WriteString(w, "Stamp is connected. You can close this tab.")
+	})
+	go server.Serve(listener)
+	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	if err := exec.Command("open", authURL).Start(); err != nil {
+		return "", fmt.Errorf("open browser: %w", err)
+	}
+	var authCode string
+	select {
+	case authCode = <-code:
+	case <-time.After(3 * time.Minute):
+		return "", errors.New("Google login timed out")
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	_ = server.Shutdown(context.Background())
+	token, err := config.Exchange(ctx, authCode)
+	if err != nil {
+		return "", fmt.Errorf("exchange Google login: %w", err)
+	}
+	if err := saveToken(clientID, token); err != nil {
+		return "", err
+	}
+	return "Google Drive connected", nil
+}
+
+func Logout() error {
+	config, clientID, err := oauthConfig()
+	if err != nil {
+		return err
+	}
+	_ = config
+	cmd := exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", clientID)
+	if output, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "could not be found") {
+		return fmt.Errorf("keychain: %v: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func New(ctx context.Context) (*Client, error) {
+	config, clientID, err := oauthConfig()
+	if err != nil {
+		return nil, err
+	}
+	token, err := loadToken(clientID)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := config.Client(ctx, token)
+	api, err := drive.NewService(ctx, option.WithHTTPClient(httpClient))
+	if err != nil {
+		return nil, err
+	}
+	return &Client{api: api}, nil
+}
+
+func (c *Client) Spaces(ctx context.Context) ([]Item, error) {
+	return c.search(ctx, "appProperties has { key='stamp_kind' and value='space' } and trashed=false")
+}
+
+func (c *Client) Projects(ctx context.Context) ([]Item, error) {
+	return c.search(ctx, "appProperties has { key='stamp_kind' and value='project' } and trashed=false")
+}
+
+func (c *Client) InitSpace(ctx context.Context, value, name string) (Item, error) {
+	id := ID(value)
+	item, err := c.Get(ctx, id)
+	if err != nil {
+		return Item{}, err
+	}
+	if !item.Folder {
+		return Item{}, errors.New("a Stamp Space must be a Google Drive folder")
+	}
+	if name == "" {
+		name = item.Name
+	}
+	updated, err := c.api.Files.Update(id, &drive.File{AppProperties: map[string]string{"stamp_kind": "space", "stamp_name": name}}).
+		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	if _, err := c.EnsureFolder(ctx, id, "Projects", map[string]string{"stamp_kind": "projects"}); err != nil {
+		return Item{}, err
+	}
+	if _, err := c.EnsureFolder(ctx, id, "Templates", map[string]string{"stamp_kind": "templates"}); err != nil {
+		return Item{}, err
+	}
+	return toItem(updated), nil
+}
+
+func (c *Client) Get(ctx context.Context, id string) (Item, error) {
+	file, err := c.api.Files.Get(id).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
+func (c *Client) Children(ctx context.Context, parentID string) ([]Item, error) {
+	return c.search(ctx, fmt.Sprintf("'%s' in parents and trashed=false", escape(parentID)))
+}
+
+func (c *Client) EnsureFolder(ctx context.Context, parentID, name string, props map[string]string) (Item, error) {
+	items, err := c.search(ctx, fmt.Sprintf("'%s' in parents and name='%s' and mimeType='%s' and trashed=false", escape(parentID), escape(name), driveFolder))
+	if err != nil {
+		return Item{}, err
+	}
+	if len(items) > 0 {
+		return items[0], nil
+	}
+	file, err := c.api.Files.Create(&drive.File{Name: name, MimeType: driveFolder, Parents: []string{parentID}, AppProperties: props}).
+		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
+func (c *Client) CreateFile(ctx context.Context, parentID, name, mime string, contents io.Reader, props map[string]string) (Item, error) {
+	file, err := c.api.Files.Create(&drive.File{Name: name, MimeType: mime, Parents: []string{parentID}, AppProperties: props}).
+		Media(contents).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
+func (c *Client) UpdateFile(ctx context.Context, id, mime string, contents io.Reader) (Item, error) {
+	file, err := c.api.Files.Update(id, &drive.File{MimeType: mime}).Media(contents).
+		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
+func (c *Client) Download(ctx context.Context, id string) ([]byte, error) {
+	response, err := c.api.Files.Get(id).SupportsAllDrives(true).Context(ctx).Download()
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	return io.ReadAll(io.LimitReader(response.Body, 513<<20))
+}
+
+func (c *Client) FindChildByProperty(ctx context.Context, parentID, key, value string) (Item, bool, error) {
+	items, err := c.search(ctx, fmt.Sprintf("'%s' in parents and appProperties has { key='%s' and value='%s' } and trashed=false", escape(parentID), escape(key), escape(value)))
+	if err != nil {
+		return Item{}, false, err
+	}
+	if len(items) == 0 {
+		return Item{}, false, nil
+	}
+	return items[0], true, nil
+}
+
+func (c *Client) search(ctx context.Context, query string) ([]Item, error) {
+	var result []Item
+	pageToken := ""
+	for {
+		call := c.api.Files.List().Q(query).Spaces("drive").Corpora("allDrives").IncludeItemsFromAllDrives(true).SupportsAllDrives(true).
+			Fields("nextPageToken,files(" + fileFields + ")").PageSize(1000).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		page, err := call.Do()
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range page.Files {
+			result = append(result, toItem(file))
+		}
+		pageToken = page.NextPageToken
+		if pageToken == "" {
+			return result, nil
+		}
+	}
+}
+
+func ID(value string) string {
+	if !strings.Contains(value, "/") {
+		return value
+	}
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`/folders/([^/?]+)`),
+		regexp.MustCompile(`/d/([^/?]+)`),
+		regexp.MustCompile(`[?&]id=([^&]+)`),
+	}
+	for _, pattern := range patterns {
+		if match := pattern.FindStringSubmatch(value); len(match) == 2 {
+			decoded, _ := url.QueryUnescape(match[1])
+			return decoded
+		}
+	}
+	return value
+}
+
+func oauthConfig() (*oauth2.Config, string, error) {
+	data, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		return nil, "", fmt.Errorf("read Google OAuth config %s: %w", ConfigPath(), err)
+	}
+	var file OAuthFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, "", err
+	}
+	installed := file.Installed
+	if installed.ClientID == "" || installed.ClientSecret == "" {
+		return nil, "", errors.New("Google OAuth config needs installed client credentials")
+	}
+	config := &oauth2.Config{
+		ClientID: installed.ClientID, ClientSecret: installed.ClientSecret,
+		Endpoint: oauth2.Endpoint{AuthURL: installed.AuthURI, TokenURL: installed.TokenURI},
+		Scopes:   []string{drive.DriveScope},
+	}
+	return config, installed.ClientID, nil
+}
+
+func loadToken(account string) (*oauth2.Token, error) {
+	output, err := exec.Command("security", "find-generic-password", "-s", keychainService, "-a", account, "-w").Output()
+	if err != nil {
+		return nil, errors.New("not logged in; run stamp login")
+	}
+	var token oauth2.Token
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &token); err != nil {
+		return nil, fmt.Errorf("read token from Keychain: %w", err)
+	}
+	return &token, nil
+}
+
+func saveToken(account string, token *oauth2.Token) error {
+	data, err := json.Marshal(token)
+	if err != nil {
+		return err
+	}
+	output, err := exec.Command("security", "add-generic-password", "-U", "-s", keychainService, "-a", account, "-w", string(data)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("save token in Keychain: %v: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func randomToken() string {
+	data := make([]byte, 24)
+	_, _ = rand.Read(data)
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func escape(value string) string {
+	return strings.ReplaceAll(value, "'", "\\'")
+}
+
+func toItem(file *drive.File) Item {
+	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: strconv.FormatInt(file.Version, 10), WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties}
+}
+
+const (
+	driveFolder = "application/vnd.google-apps.folder"
+	fileFields  = "id,name,mimeType,version,webViewLink,parents,appProperties,md5Checksum"
+)

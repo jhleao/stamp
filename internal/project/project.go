@@ -24,10 +24,13 @@ type Manifest struct {
 }
 
 type RemoteState struct {
-	FileID      string            `json:"fileId,omitempty"`
-	BaseVersion string            `json:"baseVersion,omitempty"`
-	BaseHash    string            `json:"baseHash,omitempty"`
-	Files       map[string]string `json:"files,omitempty"`
+	FileID          string            `json:"fileId,omitempty"`
+	ProjectFolderID string            `json:"projectFolderId,omitempty"`
+	CurrentFolderID string            `json:"currentFolderId,omitempty"`
+	BaseVersion     string            `json:"baseVersion,omitempty"`
+	BaseHash        string            `json:"baseHash,omitempty"`
+	WebURL          string            `json:"webUrl,omitempty"`
+	Files           map[string]string `json:"files,omitempty"`
 }
 
 type ProjectStatus struct {

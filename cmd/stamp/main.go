@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/weve-ai/stamp/internal/bundle"
+	"github.com/weve-ai/stamp/internal/collab"
+	stampdrive "github.com/weve-ai/stamp/internal/drive"
 	"github.com/weve-ai/stamp/internal/project"
 	"github.com/weve-ai/stamp/internal/render"
 )
@@ -29,6 +32,16 @@ func run(args []string) error {
 		return nil
 	}
 	switch args[0] {
+	case "login":
+		message, err := stampdrive.Login(context.Background())
+		if err == nil {
+			fmt.Println(message)
+		}
+		return err
+	case "logout":
+		return stampdrive.Logout()
+	case "space":
+		return spaceCommand(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -36,6 +49,10 @@ func run(args []string) error {
 		return projectCommand(args[1:])
 	case "preview":
 		return previewCommand(args[1:])
+	case "pull":
+		return pullCommand(args[1:])
+	case "push":
+		return pushCommand(args[1:])
 	case "status":
 		return statusCommand(args[1:])
 	case "pack":
@@ -51,33 +68,144 @@ func run(args []string) error {
 }
 
 func projectCommand(args []string) error {
-	if len(args) == 0 || args[0] != "create" {
+	if len(args) == 0 {
+		return errors.New("usage: stamp project <create|list|open>")
+	}
+	switch args[0] {
+	case "list":
+		drive, err := stampdrive.New(context.Background())
+		if err != nil {
+			return err
+		}
+		items, err := drive.Projects(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			fmt.Printf("%s\t%s\t%s\n", item.Name, item.ID, item.WebURL)
+		}
+		return nil
+	case "open":
+		pos, opts, _, err := parseArgs(args[1:], "dir")
+		if err != nil || len(pos) != 1 {
+			return errors.New("usage: stamp project open <drive-url-or-id> [--dir <directory>]")
+		}
+		drive, err := stampdrive.New(context.Background())
+		if err != nil {
+			return err
+		}
+		state, err := collab.Open(context.Background(), drive, pos[0], opts["dir"])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Opened Drive version %s\n", state.BaseVersion)
+		return nil
+	case "create":
+		return createProject(args[1:])
+	default:
+		return fmt.Errorf("unknown project command %q", args[0])
+	}
+}
+
+func createProject(args []string) error {
+	pos, opts, _, err := parseArgs(args, "name")
+	if err != nil || len(pos) != 1 {
 		return errors.New("usage: stamp project create <directory> [--name <name>]")
 	}
-	var dirArg, name string
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--name" && i+1 < len(args) {
-			name = args[i+1]
-			i++
-			continue
-		}
-		if strings.HasPrefix(args[i], "-") || dirArg != "" {
-			return errors.New("usage: stamp project create <directory> [--name <name>]")
-		}
-		dirArg = args[i]
-	}
-	if dirArg == "" {
-		return errors.New("usage: stamp project create <directory> [--name <name>]")
-	}
-	dir, err := filepath.Abs(dirArg)
+	dir, err := filepath.Abs(pos[0])
 	if err != nil {
 		return err
 	}
-	p, err := project.Create(dir, name)
+	p, err := project.Create(dir, opts["name"])
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Created %s at %s\n", p.Name, dir)
+	return nil
+}
+
+func spaceCommand(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: stamp space <list|init>")
+	}
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "list":
+		items, err := drive.Spaces(context.Background())
+		if err != nil {
+			return err
+		}
+		for _, item := range items {
+			fmt.Printf("%s\t%s\t%s\n", item.Name, item.ID, item.WebURL)
+		}
+		return nil
+	case "init":
+		pos, opts, _, err := parseArgs(args[1:], "name")
+		if err != nil || len(pos) != 1 {
+			return errors.New("usage: stamp space init <drive-folder-url-or-id> [--name <name>]")
+		}
+		item, err := drive.InitSpace(context.Background(), pos[0], opts["name"])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Initialized %s\n%s\n", item.Name, item.WebURL)
+		return nil
+	default:
+		return fmt.Errorf("unknown space command %q", args[0])
+	}
+}
+
+func pullCommand(args []string) error {
+	pos, opts, flags, err := parseArgs(args, "dir")
+	if err != nil || len(pos) != 0 {
+		return errors.New("usage: stamp pull [--dir <directory>] [--incoming|--replace]")
+	}
+	mode := collab.PullSafe
+	if flags["incoming"] {
+		mode = collab.PullIncoming
+	}
+	if flags["replace"] {
+		if mode != collab.PullSafe {
+			return errors.New("choose --incoming or --replace, not both")
+		}
+		mode = collab.PullReplace
+	}
+	root, err := project.FindRoot(defaultString(opts["dir"], "."))
+	if err != nil {
+		return err
+	}
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return err
+	}
+	message, err := collab.Pull(context.Background(), drive, root, mode)
+	if err == nil {
+		fmt.Println(message)
+	}
+	return err
+}
+
+func pushCommand(args []string) error {
+	pos, opts, _, err := parseArgs(args, "dir", "space", "message", "force-with-lease")
+	if err != nil || len(pos) != 0 {
+		return errors.New("usage: stamp push [--dir <directory>] [--space <id>] [--message <text>] [--force-with-lease <version>]")
+	}
+	root, err := project.FindRoot(defaultString(opts["dir"], "."))
+	if err != nil {
+		return err
+	}
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return err
+	}
+	state, err := collab.Push(context.Background(), drive, root, opts["space"], opts["message"], opts["force-with-lease"])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Pushed Drive version %s\n%s\n", state.BaseVersion, state.WebURL)
 	return nil
 }
 
@@ -141,11 +269,52 @@ func usage() {
 	fmt.Print(`Stamp makes document projects with people and agents.
 
 Usage:
+  stamp login | logout
+  stamp space init <drive-folder-url-or-id> [--name <name>]
+  stamp space list
   stamp project create <directory> [--name <name>]
+  stamp project list
+  stamp project open <drive-url-or-id> [--dir <directory>]
+  stamp pull [--incoming|--replace]
+  stamp push [--space <id>] [--message <text>] [--force-with-lease <version>]
   stamp preview [--dir <directory>]
   stamp status [--dir <directory>] [--json]
   stamp pack <project-directory> <archive.stamp>
   stamp unpack <archive.stamp> <directory>
   stamp version
 `)
+}
+
+func parseArgs(args []string, valueOptions ...string) ([]string, map[string]string, map[string]bool, error) {
+	wantsValue := map[string]bool{}
+	for _, name := range valueOptions {
+		wantsValue[name] = true
+	}
+	var positional []string
+	values := map[string]string{}
+	flags := map[string]bool{}
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "--") {
+			positional = append(positional, args[i])
+			continue
+		}
+		name := strings.TrimPrefix(args[i], "--")
+		if wantsValue[name] {
+			if i+1 >= len(args) {
+				return nil, nil, nil, fmt.Errorf("--%s needs a value", name)
+			}
+			values[name] = args[i+1]
+			i++
+		} else {
+			flags[name] = true
+		}
+	}
+	return positional, values, flags, nil
+}
+
+func defaultString(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
