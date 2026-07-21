@@ -14,16 +14,16 @@ pull -> edit -> preview -> push
 The previous TypeScript implementation is preserved next to this repository as
 `../stamp-old`.
 
-## Status
-
-This is the deliberately smaller Go rewrite. See [DESIGN.md](DESIGN.md) for the
-scope and the decisions we are holding ourselves to.
+Start with [the whole workflow](docs/getting-started.md). See
+[DESIGN.md](DESIGN.md) for the scope and the decisions we are holding ourselves
+to, or [docs/agents.md](docs/agents.md) to connect an agent over MCP.
 
 ## Build
 
 ```sh
 go build ./cmd/stamp
 go test ./...
+make smoke
 ```
 
 Chrome, LibreOffice, and Pandoc provide the rendering wheels. Google Drive
