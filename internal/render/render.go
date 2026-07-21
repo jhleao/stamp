@@ -3,6 +3,8 @@ package render
 import (
 	"bytes"
 	"context"
+	_ "embed"
+	"encoding/base64"
 	"fmt"
 	htmltemplate "html/template"
 	"io"
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/chromedp"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
@@ -32,7 +36,7 @@ type pageData struct {
 	Meta    map[string]any
 	Content htmltemplate.HTML
 	CSS     htmltemplate.CSS
-	BaseURL string
+	BaseURL htmltemplate.URL
 }
 
 var markdown = goldmark.New(
@@ -40,6 +44,9 @@ var markdown = goldmark.New(
 	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	goldmark.WithRendererOptions(goldhtml.WithUnsafe()),
 )
+
+//go:embed assets/paged.polyfill.min.js
+var pagedJS string
 
 func All(root string) ([]Result, error) {
 	var sources []string
@@ -152,18 +159,38 @@ func HTMLAt(root, source, baseURL string) ([]byte, error) {
 		return nil, err
 	}
 	title, _ := meta["title"].(string)
-	view := pageData{Title: title, Meta: meta, Content: htmltemplate.HTML(rendered.String()), CSS: htmltemplate.CSS(css), BaseURL: baseURL}
+	view := pageData{Title: title, Meta: meta, Content: htmltemplate.HTML(rendered.String()), CSS: htmltemplate.CSS(css), BaseURL: htmltemplate.URL(baseURL)}
 	var output bytes.Buffer
 	if err := tmpl.Execute(&output, view); err != nil {
 		return nil, err
 	}
-	lower := strings.ToLower(output.String())
+	result, err := inlineThemeFonts(root, output.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	lower := strings.ToLower(string(result))
 	for _, unsafe := range []string{"<script", "<iframe", "<object", "<embed"} {
 		if strings.Contains(lower, unsafe) {
 			return nil, fmt.Errorf("template output contains unsafe %s markup", unsafe)
 		}
 	}
-	return output.Bytes(), nil
+	return result, nil
+}
+
+func inlineThemeFonts(root string, html []byte) ([]byte, error) {
+	for _, name := range []string{"dmsans.ttf", "dmsans-italic.ttf"} {
+		marker := []byte(`theme/fonts/` + name)
+		if !bytes.Contains(html, marker) {
+			continue
+		}
+		font, err := os.ReadFile(filepath.Join(root, "theme", "fonts", name))
+		if err != nil {
+			return nil, fmt.Errorf("theme font %s: %w", name, err)
+		}
+		dataURL := []byte("data:font/ttf;base64," + base64.StdEncoding.EncodeToString(font))
+		html = bytes.ReplaceAll(html, marker, dataURL)
+	}
+	return html, nil
 }
 
 // BrowserPreview renders office formats to a cached PDF for Studio.
@@ -184,10 +211,16 @@ func BrowserPreview(root, source string) (string, error) {
 	}
 }
 
-func renderMarkdownPDF(root, source, output, _ string) error {
+func renderMarkdownPDF(root, source, output, kind string) error {
 	html, err := HTML(root, source)
 	if err != nil {
 		return err
+	}
+	if kind == "page" {
+		html, err = withPagination(html)
+		if err != nil {
+			return err
+		}
 	}
 	htmlDir := filepath.Join(root, ".stamp", "preview")
 	if err := os.MkdirAll(htmlDir, 0o755); err != nil {
@@ -207,19 +240,70 @@ func renderMarkdownPDF(root, source, output, _ string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome,
-		"--headless=new", "--disable-gpu", "--no-pdf-header-footer",
-		"--allow-file-access-from-files", "--print-to-pdf="+outputPath,
-		(&url.URL{Scheme: "file", Path: filepath.ToSlash(htmlPath)}).String(),
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome),
+		chromedp.Flag("allow-file-access-from-files", true),
 	)
-	combined, err := cmd.CombinedOutput()
+	allocator, stopChrome := chromedp.NewExecAllocator(ctx, opts...)
+	defer stopChrome()
+	browser, closeBrowser := chromedp.NewContext(allocator)
+	defer closeBrowser()
+
+	var pdf []byte
+	var paginationError string
+	actions := []chromedp.Action{
+		chromedp.Navigate((&url.URL{Scheme: "file", Path: filepath.ToSlash(htmlPath)}).String()),
+		chromedp.Poll(`document.fonts.status === "loaded"`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+	}
+	if kind == "page" {
+		actions = append(actions,
+			chromedp.Poll(`window.__stampPagedDone === true`, nil, chromedp.WithPollingTimeout(60*time.Second)),
+			chromedp.Evaluate(`window.__stampPagedError || ""`, &paginationError),
+		)
+	}
+	actions = append(actions,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			pdf, _, err = page.PrintToPDF().
+				WithPrintBackground(true).
+				WithScale(1).
+				WithMarginTop(0).
+				WithMarginBottom(0).
+				WithMarginLeft(0).
+				WithMarginRight(0).
+				WithPreferCSSPageSize(true).
+				Do(ctx)
+			return err
+		}),
+	)
+	err = chromedp.Run(browser, actions...)
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("Chromium timed out")
 	}
 	if err != nil {
-		return fmt.Errorf("Chromium: %v: %s", err, strings.TrimSpace(string(combined)))
+		return fmt.Errorf("Chromium: %w", err)
 	}
-	return nil
+	if paginationError != "" {
+		return fmt.Errorf("Paged.js: %s", paginationError)
+	}
+	return os.WriteFile(outputPath, pdf, 0o644)
+}
+
+func withPagination(html []byte) ([]byte, error) {
+	closingBody := []byte("</body>")
+	index := bytes.LastIndex(html, closingBody)
+	if index < 0 {
+		return nil, fmt.Errorf("page template has no closing body tag")
+	}
+	scripts := `<script>window.PagedConfig={auto:false};</script><script>` + pagedJS + `</script>` +
+		`<script>window.__stampPagedDone=false;window.__stampPagedError="";` +
+		`window.PagedPolyfill.preview().then(function(){window.__stampPagedDone=true;})` +
+		`.catch(function(e){window.__stampPagedError=String(e&&e.message||e);window.__stampPagedDone=true;});</script>`
+	result := make([]byte, 0, len(html)+len(scripts))
+	result = append(result, html[:index]...)
+	result = append(result, scripts...)
+	result = append(result, html[index:]...)
+	return result, nil
 }
 
 func renderDoc(root, source, output string) error {
