@@ -12,8 +12,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/weve-ai/stamp/internal/agent"
 	"github.com/weve-ai/stamp/internal/bundle"
 	"github.com/weve-ai/stamp/internal/collab"
+	"github.com/weve-ai/stamp/internal/doctor"
 	stampdrive "github.com/weve-ai/stamp/internal/drive"
 	"github.com/weve-ai/stamp/internal/project"
 	"github.com/weve-ai/stamp/internal/render"
@@ -58,6 +60,13 @@ func run(args []string) error {
 		return pushCommand(args[1:])
 	case "studio":
 		return studioCommand(args[1:])
+	case "mcp":
+		if len(args) != 2 || args[1] != "serve" {
+			return errors.New("usage: stamp mcp serve")
+		}
+		return agent.Run(context.Background(), version)
+	case "doctor":
+		return doctorCommand(args[1:])
 	case "status":
 		return statusCommand(args[1:])
 	case "pack":
@@ -217,7 +226,6 @@ func pushCommand(args []string) error {
 func studioCommand(args []string) error {
 	pos, opts, flags, err := parseArgs(args, "dir")
 	if err != nil || len(pos) != 0 {
-		return errors.New("usage: stamp studio [--dir <directory>] [--no-open]")
 	}
 	root, err := project.FindRoot(defaultString(opts["dir"], "."))
 	if err != nil {
@@ -226,6 +234,24 @@ func studioCommand(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return studio.Start(ctx, root, !flags["no-open"])
+}
+
+func doctorCommand(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: stamp doctor")
+	}
+	failed := false
+	for _, check := range doctor.Run() {
+		mark := "ok"
+		if !check.OK {
+			mark, failed = "missing", true
+		}
+		fmt.Printf("%-8s %-20s %s\n", mark, check.Name, check.Detail)
+	}
+	if failed {
+		return errors.New("some dependencies are missing")
+	}
+	return nil
 }
 
 func previewCommand(args []string) error {
@@ -297,6 +323,8 @@ Usage:
   stamp pull [--incoming|--replace]
   stamp push [--space <id>] [--message <text>] [--force-with-lease <version>]
   stamp studio [--dir <directory>] [--no-open]
+  stamp mcp serve
+  stamp doctor
   stamp preview [--dir <directory>]
   stamp status [--dir <directory>] [--json]
   stamp pack <project-directory> <archive.stamp>

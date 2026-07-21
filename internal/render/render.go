@@ -350,6 +350,11 @@ func findChrome() (string, error) {
 	return "", fmt.Errorf("Chrome or Chromium is not installed (or set STAMP_CHROME)")
 }
 
+// ChromePath reports the browser Stamp will use for page and deck PDFs.
+func ChromePath() (string, error) {
+	return findChrome()
+}
+
 func copyFile(source, destination string) error {
 	if filepath.Clean(source) == filepath.Clean(destination) {
 		return nil
