@@ -92,7 +92,7 @@ func run(args []string) error {
 
 func projectCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: stamp project <create|list|open>")
+		return errors.New("usage: stamp project <create|list|open|rename>")
 	}
 	switch args[0] {
 	case "list":
@@ -125,6 +125,37 @@ func projectCommand(args []string) error {
 		return nil
 	case "create":
 		return createProject(args[1:])
+	case "rename":
+		pos, opts, _, err := parseArgs(args[1:], "dir")
+		if err != nil || len(pos) != 1 {
+			return errors.New("usage: stamp project rename <name> [--dir <directory>]")
+		}
+		root, err := project.FindRoot(defaultString(opts["dir"], "."))
+		if err != nil {
+			return err
+		}
+		state, err := project.ReadState(root)
+		if err != nil {
+			return err
+		}
+		if state.ProjectFolderID == "" || state.FileID == "" {
+			return errors.New("project has not been pushed")
+		}
+		drive, err := stampdrive.New(context.Background())
+		if err != nil {
+			return err
+		}
+		if _, err := drive.Rename(context.Background(), state.ProjectFolderID, pos[0]); err != nil {
+			return err
+		}
+		if _, err := drive.Rename(context.Background(), state.FileID, pos[0]+".stamp"); err != nil {
+			return err
+		}
+		if err := project.Rename(root, pos[0]); err != nil {
+			return err
+		}
+		fmt.Println("Renamed project to", pos[0])
+		return nil
 	default:
 		return fmt.Errorf("unknown project command %q", args[0])
 	}
@@ -149,7 +180,7 @@ func createProject(args []string) error {
 
 func spaceCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: stamp space <list|create|init>")
+		return errors.New("usage: stamp space <list|create|init|rename>")
 	}
 	drive, err := stampdrive.New(context.Background())
 	if err != nil {
@@ -165,6 +196,16 @@ func spaceCommand(args []string) error {
 			return err
 		}
 		fmt.Printf("Created %s\n%s\n", item.Name, item.WebURL)
+		return nil
+	case "rename":
+		if len(args) != 3 {
+			return errors.New("usage: stamp space rename <drive-url-or-id> <name>")
+		}
+		item, err := drive.Rename(context.Background(), stampdrive.ID(args[1]), args[2])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Renamed Space to %s\n%s\n", item.Name, item.WebURL)
 		return nil
 	case "list":
 		items, err := drive.Spaces(context.Background())
@@ -337,10 +378,12 @@ Usage:
   stamp google-oauth <desktop-client.json>
   stamp space init <drive-folder-url-or-id> [--name <name>]
   stamp space create <name>
+  stamp space rename <drive-url-or-id> <name>
   stamp space list
   stamp project create <directory> [--name <name>]
   stamp project list
   stamp project open <drive-url-or-id> [--dir <directory>]
+  stamp project rename <name> [--dir <directory>]
   stamp pull [--incoming|--replace]
   stamp push [--space <id>] [--message <text>] [--force-with-lease <version>]
   stamp studio [--dir <directory>] [--no-open]

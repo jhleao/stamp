@@ -231,6 +231,17 @@ func (c *Client) Get(ctx context.Context, id string) (Item, error) {
 	return toItem(file), nil
 }
 
+func (c *Client) Rename(ctx context.Context, id, name string) (Item, error) {
+	if strings.TrimSpace(name) == "" {
+		return Item{}, errors.New("name is required")
+	}
+	file, err := c.api.Files.Update(id, &drive.File{Name: name}).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
 func (c *Client) Children(ctx context.Context, parentID string) ([]Item, error) {
 	return c.search(ctx, fmt.Sprintf("'%s' in parents and trashed=false", escape(parentID)))
 }

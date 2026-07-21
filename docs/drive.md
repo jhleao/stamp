@@ -34,6 +34,13 @@ Or let Stamp create a new folder at the root of My Drive:
 stamp space create Weve
 ```
 
+Rename a Space or a checked-out project without changing their Drive IDs:
+
+```sh
+stamp space rename '<Space URL or ID>' Stamp
+stamp project rename Test --dir ./weve-stamp
+```
+
 The refresh token is stored in macOS Keychain under the service
 `sh.stamp.google-drive`. `stamp logout` removes it.
 

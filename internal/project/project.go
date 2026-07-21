@@ -96,6 +96,18 @@ func Load(root string) (Manifest, error) {
 	return manifest, nil
 }
 
+func Rename(root, name string) error {
+	manifest, err := Load(root)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return errors.New("project name is required")
+	}
+	manifest.Name = name
+	return writeYAML(filepath.Join(root, ManifestName), manifest)
+}
+
 func FindRoot(start string) (string, error) {
 	current, err := filepath.Abs(start)
 	if err != nil {
