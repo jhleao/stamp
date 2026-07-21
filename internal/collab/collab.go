@@ -220,14 +220,6 @@ func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message,
 	if err := drive.Retain(ctx, updated); err != nil {
 		return state, fmt.Errorf("canonical version %s was pushed, but Drive did not preserve its revision: %w", updated.Version, err)
 	}
-	latest, err := drive.Get(ctx, state.FileID)
-	if err != nil {
-		return state, fmt.Errorf("canonical version was retained, but its final lease could not be read: %w", err)
-	}
-	state.BaseVersion = latest.Version
-	if err := project.WriteState(root, state); err != nil {
-		return state, err
-	}
 	if err := syncOutputs(ctx, drive, root, state.CurrentFolderID); err != nil {
 		return state, fmt.Errorf("canonical version %s was pushed, but output mirrors need retrying: %w", state.BaseVersion, err)
 	}

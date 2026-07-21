@@ -19,7 +19,7 @@ It runs on macOS and treats Google Drive as the collaboration surface.
 - **Project:** one canonical `.stamp` file plus visible current outputs.
 - **Workspace:** the expanded local copy of a project.
 - **Version:** a Google Drive revision of the canonical `.stamp` file.
-- **Lease:** the Drive file version the workspace was pulled from.
+- **Lease:** the canonical file's immutable Drive content revision ID.
 - **Studio:** a local browser editor and preview, never a hosted service.
 
 ## Workflow
@@ -65,7 +65,7 @@ Drive's 200-revision limit for binary files.
 
 ## Conflict rules
 
-The local workspace records the canonical Drive file ID, version, and hash.
+The local workspace records the canonical Drive file ID, head revision, and hash.
 
 - Pull replaces a clean workspace.
 - Pull refuses when both the workspace and Drive changed.

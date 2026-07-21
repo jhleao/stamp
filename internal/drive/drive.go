@@ -419,7 +419,11 @@ func escape(value string) string {
 }
 
 func toItem(file *drive.File) Item {
-	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: strconv.FormatInt(file.Version, 10), WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties, revision: file.HeadRevisionId}
+	version := file.HeadRevisionId
+	if version == "" {
+		version = strconv.FormatInt(file.Version, 10)
+	}
+	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: version, WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties, revision: file.HeadRevisionId}
 }
 
 const (

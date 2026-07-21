@@ -66,7 +66,9 @@ stamp project open '<Drive URL>' --dir board-pack
 ```
 
 Stamp stores the canonical project in one `.stamp` file. Each push updates that
-file, producing a Google Drive revision marked `keepForever`. Drive allows up
+file, producing a Google Drive revision marked `keepForever`. The immutable
+head content revision ID is the workspace lease; unrelated Drive metadata does
+not create false conflicts. Drive allows up
 to 200 retained revisions for a binary file; that is Stamp's intentional
 version-history ceiling. The visible files under the project's `Current`
 folder are derived mirrors and can always be regenerated.
