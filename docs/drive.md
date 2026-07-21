@@ -2,7 +2,13 @@
 
 Stamp uses a Google OAuth desktop client owned by the organization. In Google
 Cloud, enable the Drive API, configure the consent screen, and create an OAuth
-client with application type **Desktop app**. Download its JSON file to:
+client with application type **Desktop app**. Install the downloaded JSON:
+
+```sh
+stamp google-oauth ~/Downloads/client_secret_....json
+```
+
+Stamp validates and copies it with private permissions to:
 
 ```text
 ~/Library/Application Support/Stamp/google-oauth.json

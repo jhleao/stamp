@@ -45,6 +45,15 @@ func run(args []string) error {
 		return err
 	case "logout":
 		return stampdrive.Logout()
+	case "google-oauth":
+		if len(args) != 2 {
+			return errors.New("usage: stamp google-oauth <desktop-client.json>")
+		}
+		destination, err := stampdrive.InstallConfig(args[1])
+		if err == nil {
+			fmt.Println("Installed Google OAuth config at", destination)
+		}
+		return err
 	case "space":
 		return spaceCommand(args[1:])
 	case "version", "--version", "-v":
@@ -315,6 +324,7 @@ func usage() {
 
 Usage:
   stamp login | logout
+  stamp google-oauth <desktop-client.json>
   stamp space init <drive-folder-url-or-id> [--name <name>]
   stamp space list
   stamp project create <directory> [--name <name>]

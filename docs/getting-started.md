@@ -15,6 +15,7 @@ Create a Google OAuth desktop client as described in [drive.md](drive.md), then
 mark an existing Drive folder as the shared Space:
 
 ```sh
+stamp google-oauth ~/Downloads/client_secret_....json
 stamp login
 stamp space init '<Drive folder URL>' --name 'Weve'
 ```

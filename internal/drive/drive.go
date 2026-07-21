@@ -60,6 +60,31 @@ func ConfigPath() string {
 	return filepath.Join(home, "Library", "Application Support", "Stamp", "google-oauth.json")
 }
 
+func InstallConfig(source string) (string, error) {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	var file OAuthFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return "", fmt.Errorf("read OAuth JSON: %w", err)
+	}
+	if file.Installed.ClientID == "" || file.Installed.ClientSecret == "" {
+		return "", errors.New("not a Google OAuth Desktop app JSON file")
+	}
+	destination := ConfigPath()
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(destination, data, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(destination, 0o600); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
+
 func Login(ctx context.Context) (string, error) {
 	config, clientID, err := oauthConfig()
 	if err != nil {
