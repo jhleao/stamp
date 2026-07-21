@@ -151,10 +151,22 @@ func projectCommand(args []string) error {
 		if _, err := drive.Rename(context.Background(), state.FileID, pos[0]+".stamp"); err != nil {
 			return err
 		}
+		canonical, err := drive.Get(context.Background(), state.FileID)
+		if err != nil {
+			return err
+		}
+		state.BaseVersion = canonical.Version
+		if err := project.WriteState(root, state); err != nil {
+			return err
+		}
 		if err := project.Rename(root, pos[0]); err != nil {
 			return err
 		}
-		fmt.Println("Renamed project to", pos[0])
+		state, err = collab.Push(context.Background(), drive, root, "", "rename project to "+pos[0], "")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Renamed project to %s at Drive version %s\n", pos[0], state.BaseVersion)
 		return nil
 	default:
 		return fmt.Errorf("unknown project command %q", args[0])
