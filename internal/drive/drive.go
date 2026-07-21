@@ -280,6 +280,15 @@ func (c *Client) UpdateFile(ctx context.Context, id, mime string, contents io.Re
 	return toItem(file), nil
 }
 
+func (c *Client) UpdateNamedFile(ctx context.Context, id, name, mime string, contents io.Reader) (Item, error) {
+	file, err := c.api.Files.Update(id, &drive.File{Name: name, MimeType: mime}).Media(contents).
+		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
+}
+
 func (c *Client) Trash(ctx context.Context, id string) error {
 	_, err := c.api.Files.Update(id, &drive.File{Trashed: true}).SupportsAllDrives(true).Context(ctx).Do()
 	return err

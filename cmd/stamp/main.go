@@ -148,17 +148,6 @@ func projectCommand(args []string) error {
 		if _, err := drive.Rename(context.Background(), state.ProjectFolderID, pos[0]); err != nil {
 			return err
 		}
-		if _, err := drive.Rename(context.Background(), state.FileID, pos[0]+".stamp"); err != nil {
-			return err
-		}
-		canonical, err := drive.Get(context.Background(), state.FileID)
-		if err != nil {
-			return err
-		}
-		state.BaseVersion = canonical.Version
-		if err := project.WriteState(root, state); err != nil {
-			return err
-		}
 		if err := project.Rename(root, pos[0]); err != nil {
 			return err
 		}

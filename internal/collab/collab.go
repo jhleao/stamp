@@ -204,7 +204,7 @@ func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message,
 		updated, err = drive.CreateFile(ctx, state.ProjectFolderID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()), map[string]string{"stamp_kind": "canonical", "stamp_id": manifest.ID})
 		state.FileID = updated.ID
 	} else {
-		updated, err = drive.UpdateFile(ctx, state.FileID, stampMIME, bytes.NewReader(archive.Bytes()))
+		updated, err = drive.UpdateNamedFile(ctx, state.FileID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()))
 	}
 	if err != nil {
 		return project.RemoteState{}, err
