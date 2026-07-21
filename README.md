@@ -28,3 +28,13 @@ go test ./...
 
 Chrome, LibreOffice, and Pandoc provide the rendering wheels. Google Drive
 setup is documented in [docs/drive.md](docs/drive.md).
+
+Create a project and open the local workbench:
+
+```sh
+./stamp project create board-pack --name 'Board Pack'
+cd board-pack
+../stamp studio
+```
+
+See [docs/studio.md](docs/studio.md) for preview behavior and boundaries.

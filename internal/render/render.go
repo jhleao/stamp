@@ -116,6 +116,11 @@ func outputPath(source, name string) string {
 }
 
 func HTML(root, source string) ([]byte, error) {
+	baseURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(root) + "/"}).String()
+	return HTMLAt(root, source, baseURL)
+}
+
+func HTMLAt(root, source, baseURL string) ([]byte, error) {
 	k := kind(source)
 	if k != "page" && k != "deck" {
 		return nil, fmt.Errorf("%s does not have an HTML preview", source)
@@ -147,13 +152,36 @@ func HTML(root, source string) ([]byte, error) {
 		return nil, err
 	}
 	title, _ := meta["title"].(string)
-	baseURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(root) + "/"}).String()
 	view := pageData{Title: title, Meta: meta, Content: htmltemplate.HTML(rendered.String()), CSS: htmltemplate.CSS(css), BaseURL: baseURL}
 	var output bytes.Buffer
 	if err := tmpl.Execute(&output, view); err != nil {
 		return nil, err
 	}
+	lower := strings.ToLower(output.String())
+	for _, unsafe := range []string{"<script", "<iframe", "<object", "<embed"} {
+		if strings.Contains(lower, unsafe) {
+			return nil, fmt.Errorf("template output contains unsafe %s markup", unsafe)
+		}
+	}
 	return output.Bytes(), nil
+}
+
+// BrowserPreview renders office formats to a cached PDF for Studio.
+func BrowserPreview(root, source string) (string, error) {
+	k := kind(source)
+	previewDir := filepath.Join(root, ".stamp", "preview", "office")
+	if err := os.MkdirAll(previewDir, 0o755); err != nil {
+		return "", err
+	}
+	output := filepath.Join(previewDir, strings.ReplaceAll(filepath.ToSlash(source), "/", "-")+".pdf")
+	switch k {
+	case "fods", "fodp", "xlsx":
+		return output, libreOfficeAbsolute(filepath.Join(root, source), output, "pdf")
+	case "doc":
+		return output, renderDoc(root, source, filepath.ToSlash(strings.TrimPrefix(output, root+string(filepath.Separator))))
+	default:
+		return "", fmt.Errorf("%s does not need an office preview", source)
+	}
 }
 
 func renderMarkdownPDF(root, source, output, _ string) error {

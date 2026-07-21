@@ -7,14 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/weve-ai/stamp/internal/bundle"
 	"github.com/weve-ai/stamp/internal/collab"
 	stampdrive "github.com/weve-ai/stamp/internal/drive"
 	"github.com/weve-ai/stamp/internal/project"
 	"github.com/weve-ai/stamp/internal/render"
+	"github.com/weve-ai/stamp/internal/studio"
 )
 
 var version = "dev"
@@ -53,6 +56,8 @@ func run(args []string) error {
 		return pullCommand(args[1:])
 	case "push":
 		return pushCommand(args[1:])
+	case "studio":
+		return studioCommand(args[1:])
 	case "status":
 		return statusCommand(args[1:])
 	case "pack":
@@ -209,6 +214,20 @@ func pushCommand(args []string) error {
 	return nil
 }
 
+func studioCommand(args []string) error {
+	pos, opts, flags, err := parseArgs(args, "dir")
+	if err != nil || len(pos) != 0 {
+		return errors.New("usage: stamp studio [--dir <directory>] [--no-open]")
+	}
+	root, err := project.FindRoot(defaultString(opts["dir"], "."))
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return studio.Start(ctx, root, !flags["no-open"])
+}
+
 func previewCommand(args []string) error {
 	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
 	dir := fs.String("dir", ".", "project directory")
@@ -277,6 +296,7 @@ Usage:
   stamp project open <drive-url-or-id> [--dir <directory>]
   stamp pull [--incoming|--replace]
   stamp push [--space <id>] [--message <text>] [--force-with-lease <version>]
+  stamp studio [--dir <directory>] [--no-open]
   stamp preview [--dir <directory>]
   stamp status [--dir <directory>] [--json]
   stamp pack <project-directory> <archive.stamp>
