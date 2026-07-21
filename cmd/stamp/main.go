@@ -149,13 +149,23 @@ func createProject(args []string) error {
 
 func spaceCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: stamp space <list|init>")
+		return errors.New("usage: stamp space <list|create|init>")
 	}
 	drive, err := stampdrive.New(context.Background())
 	if err != nil {
 		return err
 	}
 	switch args[0] {
+	case "create":
+		if len(args) != 2 {
+			return errors.New("usage: stamp space create <name>")
+		}
+		item, err := drive.CreateSpace(context.Background(), args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Created %s\n%s\n", item.Name, item.WebURL)
+		return nil
 	case "list":
 		items, err := drive.Spaces(context.Background())
 		if err != nil {
@@ -326,6 +336,7 @@ Usage:
   stamp login | logout
   stamp google-oauth <desktop-client.json>
   stamp space init <drive-folder-url-or-id> [--name <name>]
+  stamp space create <name>
   stamp space list
   stamp project create <directory> [--name <name>]
   stamp project list

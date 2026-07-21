@@ -17,7 +17,7 @@ mark an existing Drive folder as the shared Space:
 ```sh
 stamp google-oauth ~/Downloads/client_secret_....json
 stamp login
-stamp space init '<Drive folder URL>' --name 'Weve'
+stamp space create 'Weve'
 ```
 
 Stamp adds only `Projects/` and `Templates/`. There is no server or database.

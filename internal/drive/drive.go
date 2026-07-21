@@ -202,6 +202,27 @@ func (c *Client) InitSpace(ctx context.Context, value, name string) (Item, error
 	return toItem(updated), nil
 }
 
+func (c *Client) CreateSpace(ctx context.Context, name string) (Item, error) {
+	if strings.TrimSpace(name) == "" {
+		return Item{}, errors.New("space name is required")
+	}
+	folder, err := c.api.Files.Create(&drive.File{
+		Name:          name,
+		MimeType:      driveFolder,
+		AppProperties: map[string]string{"stamp_kind": "space", "stamp_name": name},
+	}).Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	if _, err := c.EnsureFolder(ctx, folder.Id, "Projects", map[string]string{"stamp_kind": "projects"}); err != nil {
+		return Item{}, err
+	}
+	if _, err := c.EnsureFolder(ctx, folder.Id, "Templates", map[string]string{"stamp_kind": "templates"}); err != nil {
+		return Item{}, err
+	}
+	return toItem(folder), nil
+}
+
 func (c *Client) Get(ctx context.Context, id string) (Item, error) {
 	file, err := c.api.Files.Get(id).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
 	if err != nil {

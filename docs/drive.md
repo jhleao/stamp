@@ -28,6 +28,12 @@ stamp space init 'https://drive.google.com/drive/folders/...' --name Weve
 stamp space list
 ```
 
+Or let Stamp create a new folder at the root of My Drive:
+
+```sh
+stamp space create Weve
+```
+
 The refresh token is stored in macOS Keychain under the service
 `sh.stamp.google-drive`. `stamp logout` removes it.
 
