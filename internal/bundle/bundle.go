@@ -35,7 +35,6 @@ func Pack(root string, destination io.Writer) error {
 
 func PackWith(root string, destination io.Writer, extra map[string][]byte) error {
 	archive := zip.NewWriter(destination)
-	defer archive.Close()
 	count := 0
 	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -90,6 +89,7 @@ func PackWith(root string, destination io.Writer, extra map[string][]byte) error
 		}
 		return closeErr
 	}); err != nil {
+		_ = archive.Close()
 		return err
 	}
 	for name, data := range extra {
@@ -99,13 +99,15 @@ func PackWith(root string, destination io.Writer, extra map[string][]byte) error
 		}
 		writer, err := archive.CreateHeader(&zip.FileHeader{Name: clean, Method: zip.Deflate})
 		if err != nil {
+			_ = archive.Close()
 			return err
 		}
 		if _, err := writer.Write(data); err != nil {
+			_ = archive.Close()
 			return err
 		}
 	}
-	return nil
+	return archive.Close()
 }
 
 func UnpackFile(source, destination string) error {

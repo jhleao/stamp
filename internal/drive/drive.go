@@ -32,13 +32,14 @@ type Client struct {
 }
 
 type Item struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Folder  bool              `json:"folder"`
-	Version string            `json:"version,omitempty"`
-	WebURL  string            `json:"webUrl,omitempty"`
-	Parents []string          `json:"parents,omitempty"`
-	Props   map[string]string `json:"properties,omitempty"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Folder   bool              `json:"folder"`
+	Version  string            `json:"version,omitempty"`
+	WebURL   string            `json:"webUrl,omitempty"`
+	Parents  []string          `json:"parents,omitempty"`
+	Props    map[string]string `json:"properties,omitempty"`
+	revision string
 }
 
 type OAuthFile struct {
@@ -222,6 +223,19 @@ func (c *Client) UpdateFile(ctx context.Context, id, mime string, contents io.Re
 	return toItem(file), nil
 }
 
+func (c *Client) Trash(ctx context.Context, id string) error {
+	_, err := c.api.Files.Update(id, &drive.File{Trashed: true}).SupportsAllDrives(true).Context(ctx).Do()
+	return err
+}
+
+func (c *Client) Retain(ctx context.Context, item Item) error {
+	if item.revision == "" {
+		return errors.New("Drive did not return a revision ID")
+	}
+	_, err := c.api.Revisions.Update(item.ID, item.revision, &drive.Revision{KeepForever: true}).Context(ctx).Do()
+	return err
+}
+
 func (c *Client) Download(ctx context.Context, id string) ([]byte, error) {
 	response, err := c.api.Files.Get(id).SupportsAllDrives(true).Context(ctx).Download()
 	if err != nil {
@@ -339,10 +353,10 @@ func escape(value string) string {
 }
 
 func toItem(file *drive.File) Item {
-	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: strconv.FormatInt(file.Version, 10), WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties}
+	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: strconv.FormatInt(file.Version, 10), WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties, revision: file.HeadRevisionId}
 }
 
 const (
 	driveFolder = "application/vnd.google-apps.folder"
-	fileFields  = "id,name,mimeType,version,webViewLink,parents,appProperties,md5Checksum"
+	fileFields  = "id,name,mimeType,version,headRevisionId,webViewLink,parents,appProperties,md5Checksum"
 )

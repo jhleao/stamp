@@ -60,6 +60,8 @@ Q3 Board Pack/
 
 Drive revisions are project versions. Stamp does not build a version graph,
 lock server, database, release protocol, or per-file remote sync engine.
+Canonical revisions are retained using Drive's `keepForever` flag, within
+Drive's 200-revision limit for binary files.
 
 ## Conflict rules
 
@@ -135,4 +137,3 @@ Do not build:
 - abstractions justified only by possible future backends.
 
 The target is roughly 4,000-6,000 readable Go and browser lines. Less is better.
-

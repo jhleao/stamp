@@ -80,9 +80,12 @@ func Open(ctx context.Context, drive *stampdrive.Client, value, destination stri
 	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), destination); err != nil {
 		return project.RemoteState{}, err
 	}
-	current, _, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
+	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
 	if err != nil {
 		return project.RemoteState{}, err
+	}
+	if !ok {
+		return project.RemoteState{}, errors.New("Drive project has no Current folder")
 	}
 	hashes, err := project.FileHashes(destination)
 	if err != nil {
@@ -167,46 +170,63 @@ func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message,
 	if err != nil {
 		return project.RemoteState{}, err
 	}
-	if state.FileID == "" {
+	firstPush := state.FileID == ""
+	if firstPush {
 		if spaceID == "" {
 			return project.RemoteState{}, errors.New("first push needs --space <space-id-or-url>")
 		}
-		if err := createRemote(ctx, drive, root, manifest, stampdrive.ID(spaceID), &state); err != nil {
+		if err := createRemote(ctx, drive, manifest, stampdrive.ID(spaceID), &state); err != nil {
 			return project.RemoteState{}, err
 		}
 	}
-	remote, err := drive.Get(ctx, state.FileID)
-	if err != nil {
-		return project.RemoteState{}, err
+	remoteVersion := ""
+	if !firstPush {
+		remote, err := drive.Get(ctx, state.FileID)
+		if err != nil {
+			return project.RemoteState{}, err
+		}
+		remoteVersion = remote.Version
+		if state.BaseVersion != "" && remoteVersion != state.BaseVersion && forceLease != remoteVersion {
+			return project.RemoteState{}, fmt.Errorf("push refused: workspace lease is %s but Drive is %s; pull first, or use --force-with-lease %s after reviewing it", state.BaseVersion, remoteVersion, remoteVersion)
+		}
+		if forceLease != "" && forceLease != remoteVersion {
+			return project.RemoteState{}, fmt.Errorf("force lease %s is stale; Drive is %s", forceLease, remoteVersion)
+		}
 	}
-	if state.BaseVersion != "" && remote.Version != state.BaseVersion && forceLease != remote.Version {
-		return project.RemoteState{}, fmt.Errorf("push refused: workspace lease is %s but Drive is %s; pull first, or use --force-with-lease %s after reviewing it", state.BaseVersion, remote.Version, remote.Version)
-	}
-	if forceLease != "" && forceLease != remote.Version {
-		return project.RemoteState{}, fmt.Errorf("force lease %s is stale; Drive is %s", forceLease, remote.Version)
-	}
-	version := VersionInfo{Message: message, CreatedAt: time.Now().UTC().Format(time.RFC3339), ParentVersion: remote.Version}
+	version := VersionInfo{Message: message, CreatedAt: time.Now().UTC().Format(time.RFC3339), ParentVersion: remoteVersion}
 	versionJSON, _ := json.MarshalIndent(version, "", "  ")
 	var archive bytes.Buffer
 	if err := bundle.PackWith(root, &archive, map[string][]byte{".stamp/version.json": append(versionJSON, '\n')}); err != nil {
 		return project.RemoteState{}, err
 	}
-	updated, err := drive.UpdateFile(ctx, state.FileID, stampMIME, bytes.NewReader(archive.Bytes()))
+	var updated stampdrive.Item
+	if firstPush {
+		updated, err = drive.CreateFile(ctx, state.ProjectFolderID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()), map[string]string{"stamp_kind": "canonical", "stamp_id": manifest.ID})
+		state.FileID = updated.ID
+	} else {
+		updated, err = drive.UpdateFile(ctx, state.FileID, stampMIME, bytes.NewReader(archive.Bytes()))
+	}
 	if err != nil {
 		return project.RemoteState{}, err
-	}
-	if err := syncOutputs(ctx, drive, root, state.CurrentFolderID); err != nil {
-		return project.RemoteState{}, fmt.Errorf("canonical version %s was pushed, but output mirrors need retrying: %w", updated.Version, err)
 	}
 	hashes, err := project.FileHashes(root)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
 	state.BaseVersion, state.BaseHash, state.Files = updated.Version, hash(archive.Bytes()), hashes
-	return state, project.WriteState(root, state)
+	if err := project.WriteState(root, state); err != nil {
+		return state, err
+	}
+	if err := drive.Retain(ctx, updated); err != nil {
+		return state, fmt.Errorf("canonical version %s was pushed, but Drive did not preserve its revision: %w", updated.Version, err)
+	}
+	if err := syncOutputs(ctx, drive, root, state.CurrentFolderID); err != nil {
+		return state, fmt.Errorf("canonical version %s was pushed, but output mirrors need retrying: %w", updated.Version, err)
+	}
+	return state, nil
 }
 
-func createRemote(ctx context.Context, drive *stampdrive.Client, root string, manifest project.Manifest, spaceID string, state *project.RemoteState) error {
+func createRemote(ctx context.Context, drive *stampdrive.Client, manifest project.Manifest, spaceID string, state *project.RemoteState) error {
 	projects, err := drive.EnsureFolder(ctx, spaceID, "Projects", map[string]string{"stamp_kind": "projects"})
 	if err != nil {
 		return err
@@ -219,16 +239,7 @@ func createRemote(ctx context.Context, drive *stampdrive.Client, root string, ma
 	if err != nil {
 		return err
 	}
-	var archive bytes.Buffer
-	if err := bundle.Pack(root, &archive); err != nil {
-		return err
-	}
-	canonical, err := drive.CreateFile(ctx, folder.ID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()), map[string]string{"stamp_kind": "canonical", "stamp_id": manifest.ID})
-	if err != nil {
-		return err
-	}
-	state.FileID, state.ProjectFolderID, state.CurrentFolderID = canonical.ID, folder.ID, current.ID
-	state.BaseVersion, state.BaseHash, state.WebURL = canonical.Version, hash(archive.Bytes()), folder.WebURL
+	state.ProjectFolderID, state.CurrentFolderID, state.WebURL = folder.ID, current.ID, folder.WebURL
 	return nil
 }
 
@@ -236,7 +247,8 @@ func syncOutputs(ctx context.Context, drive *stampdrive.Client, root, folderID s
 	if folderID == "" {
 		return errors.New("project has no Current folder")
 	}
-	return filepath.WalkDir(filepath.Join(root, "outputs"), func(path string, entry fs.DirEntry, err error) error {
+	current := map[string]bool{}
+	if err := filepath.WalkDir(filepath.Join(root, "outputs"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -252,6 +264,7 @@ func syncOutputs(ctx context.Context, drive *stampdrive.Client, root, folderID s
 			return err
 		}
 		key := filepath.ToSlash(rel)
+		current[key] = true
 		item, ok, err := drive.FindChildByProperty(ctx, folderID, "stamp_path", key)
 		if err != nil {
 			return err
@@ -263,7 +276,21 @@ func syncOutputs(ctx context.Context, drive *stampdrive.Client, root, folderID s
 			_, err = drive.CreateFile(ctx, folderID, strings.ReplaceAll(key, "/", " - "), mime, bytes.NewReader(data), map[string]string{"stamp_kind": "output", "stamp_path": key})
 		}
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	items, err := drive.Children(ctx, folderID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if path := item.Props["stamp_path"]; path != "" && !current[path] {
+			if err := drive.Trash(ctx, item.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func replaceWorkspace(root string, contents []byte) error {
