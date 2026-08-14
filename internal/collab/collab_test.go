@@ -176,7 +176,9 @@ func TestReconnectPreservesOldLinkAndPublishesNewProject(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	state, recovery, err := Reconnect(context.Background(), drive, root, "space", "Migrate Drive client")
+	state, recovery, err := reconnect(context.Background(), drive, root, "space", "Migrate Drive client", func(string) error {
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

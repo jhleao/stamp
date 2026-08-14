@@ -197,11 +197,20 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 }
 
 func Push(ctx context.Context, drive Drive, root, spaceID, message, forceLease string) (project.RemoteState, error) {
+	return push(ctx, drive, root, spaceID, message, forceLease, renderProject)
+}
+
+func renderProject(root string) error {
+	_, err := render.All(root)
+	return err
+}
+
+func push(ctx context.Context, drive Drive, root, spaceID, message, forceLease string, renderWorkspace func(string) error) (project.RemoteState, error) {
 	manifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
-	if _, err := render.All(root); err != nil {
+	if err := renderWorkspace(root); err != nil {
 		return project.RemoteState{}, err
 	}
 	state, err := project.ReadState(root)
@@ -266,6 +275,10 @@ func Push(ctx context.Context, drive Drive, root, spaceID, message, forceLease s
 // modified. This is primarily useful when changing OAuth applications because
 // drive.file grants do not transfer between client IDs.
 func Reconnect(ctx context.Context, drive Drive, root, spaceID, message string) (project.RemoteState, string, error) {
+	return reconnect(ctx, drive, root, spaceID, message, renderProject)
+}
+
+func reconnect(ctx context.Context, drive Drive, root, spaceID, message string, renderWorkspace func(string) error) (project.RemoteState, string, error) {
 	if strings.TrimSpace(spaceID) == "" {
 		return project.RemoteState{}, "", errors.New("reconnect needs --space <space-id-or-url>")
 	}
@@ -291,7 +304,7 @@ func Reconnect(ctx context.Context, drive Drive, root, spaceID, message string) 
 	if err := project.WriteState(root, project.RemoteState{}); err != nil {
 		return project.RemoteState{}, recovery, err
 	}
-	state, err := Push(ctx, drive, root, spaceID, message, "")
+	state, err := push(ctx, drive, root, spaceID, message, "", renderWorkspace)
 	if err != nil {
 		if restoreErr := project.WriteState(root, previous); restoreErr != nil {
 			return project.RemoteState{}, recovery, fmt.Errorf("reconnect failed: %v; restore previous Drive link: %w", err, restoreErr)

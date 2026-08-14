@@ -655,9 +655,6 @@ func newChromePrinter() (*chromePrinter, error) {
 		chromedp.ExecPath(chrome),
 		chromedp.Flag("allow-file-access-from-files", true),
 	)
-	if os.Getenv("STAMP_CHROME_NO_SANDBOX") == "1" {
-		opts = append(opts, chromedp.Flag("no-sandbox", true))
-	}
 	allocator, closeAllocator := chromedp.NewExecAllocator(context.Background(), opts...)
 	browser, closeBrowser := chromedp.NewContext(allocator)
 	if err := chromedp.Run(browser); err != nil {
