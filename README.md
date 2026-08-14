@@ -28,7 +28,7 @@ Use the CLI, the local Studio, or the bundled MCP server. They all operate on th
 
 ## Install
 
-Download the archive for your platform from [GitHub Releases](https://github.com/jhleao/steamp/releases), extract it, and place `stamp` on your `PATH`:
+Download the archive for your platform from [GitHub Releases](https://github.com/jhleao/stamp/releases), extract it, and place `stamp` on your `PATH`:
 
 ```sh
 install -m 0755 stamp ~/.local/bin/stamp
@@ -46,8 +46,8 @@ brew install go node pandoc libreoffice
 brew install --cask google-chrome
 npm install -g @tailwindcss/cli
 
-git clone https://github.com/jhleao/steamp.git
-cd steamp
+git clone https://github.com/jhleao/stamp.git
+cd stamp
 npm install
 make install
 ```

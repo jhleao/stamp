@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/weve-ai/stamp/internal/agent"
-	"github.com/weve-ai/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/agent"
+	"github.com/jhleao/stamp/internal/project"
 )
 
 type Result struct {

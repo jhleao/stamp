@@ -3,23 +3,23 @@
 
 ### Bug Fixes
 
-* finish project renames in one go ([5312862](https://github.com/jhleao/steamp/commit/53128627cc53f8102bef52069d25a6764981ff4c))
-* keep pushes tidy and recoverable ([99050e3](https://github.com/jhleao/steamp/commit/99050e3aedcfd4aef55536a18a4217e9e386203b))
-* lease the content instead of Drive metadata ([cd336f1](https://github.com/jhleao/steamp/commit/cd336f1e1c7431955d15e1671d5ad67c977c679a))
-* let pages use their actual layout engine ([19759f2](https://github.com/jhleao/steamp/commit/19759f28a7980282c04d633e1f53170d67e8c3be))
-* remember Drive's retained lease ([237aaa0](https://github.com/jhleao/steamp/commit/237aaa050827d8e2bbfb7f0cc735a3d56b249500))
-* rename the archive with its push ([aee5c08](https://github.com/jhleao/steamp/commit/aee5c084537022395986b752b6d698ae00632eb0))
-* start Chromium reliably in release CI ([328b623](https://github.com/jhleao/steamp/commit/328b623f8551cb96c9f134b4faf464b60a9b71e3))
+* finish project renames in one go ([5312862](https://github.com/jhleao/stamp/commit/53128627cc53f8102bef52069d25a6764981ff4c))
+* keep pushes tidy and recoverable ([99050e3](https://github.com/jhleao/stamp/commit/99050e3aedcfd4aef55536a18a4217e9e386203b))
+* lease the content instead of Drive metadata ([cd336f1](https://github.com/jhleao/stamp/commit/cd336f1e1c7431955d15e1671d5ad67c977c679a))
+* let pages use their actual layout engine ([19759f2](https://github.com/jhleao/stamp/commit/19759f28a7980282c04d633e1f53170d67e8c3be))
+* remember Drive's retained lease ([237aaa0](https://github.com/jhleao/stamp/commit/237aaa050827d8e2bbfb7f0cc735a3d56b249500))
+* rename the archive with its push ([aee5c08](https://github.com/jhleao/stamp/commit/aee5c084537022395986b752b6d698ae00632eb0))
+* start Chromium reliably in release CI ([328b623](https://github.com/jhleao/stamp/commit/328b623f8551cb96c9f134b4faf464b60a9b71e3))
 
 
 ### Features
 
-* automate semantic GitHub releases ([383d1c5](https://github.com/jhleao/steamp/commit/383d1c5bbc12651ebd6f7580d617d1bd982c4b1c))
-* complete Studio and collaboration workflows ([b15c11e](https://github.com/jhleao/steamp/commit/b15c11e32e566ee52c4a52607ad4692eba32204f))
-* create a Space in My Drive ([97702cf](https://github.com/jhleao/steamp/commit/97702cfc246d52c9db7a49ae4fb8fccfe217ad9e))
-* get local projects rendering ([f3a6e15](https://github.com/jhleao/steamp/commit/f3a6e157d37322e161e2b9c1c3e391d976119345))
-* give Spaces and projects better names ([aba2449](https://github.com/jhleao/steamp/commit/aba24494fb2a8284201337fa2c8c397f86db2579))
-* install Google credentials for me ([6a48e15](https://github.com/jhleao/steamp/commit/6a48e15f7992ea30baa28ba1b594f683a471ce06))
-* let agents drive Stamp ([8dbdf5b](https://github.com/jhleao/steamp/commit/8dbdf5b00fea956f224990c0a90ebbefc84ddd3c))
-* make Studio feel alive ([bb27210](https://github.com/jhleao/steamp/commit/bb27210088cb963f2b6ce9ff6d288365114a63fc))
-* put projects on Drive ([7b6a64c](https://github.com/jhleao/steamp/commit/7b6a64c1f57170115a4388d2b9784f88a657c502))
+* automate semantic GitHub releases ([383d1c5](https://github.com/jhleao/stamp/commit/383d1c5bbc12651ebd6f7580d617d1bd982c4b1c))
+* complete Studio and collaboration workflows ([b15c11e](https://github.com/jhleao/stamp/commit/b15c11e32e566ee52c4a52607ad4692eba32204f))
+* create a Space in My Drive ([97702cf](https://github.com/jhleao/stamp/commit/97702cfc246d52c9db7a49ae4fb8fccfe217ad9e))
+* get local projects rendering ([f3a6e15](https://github.com/jhleao/stamp/commit/f3a6e157d37322e161e2b9c1c3e391d976119345))
+* give Spaces and projects better names ([aba2449](https://github.com/jhleao/stamp/commit/aba24494fb2a8284201337fa2c8c397f86db2579))
+* install Google credentials for me ([6a48e15](https://github.com/jhleao/stamp/commit/6a48e15f7992ea30baa28ba1b594f683a471ce06))
+* let agents drive Stamp ([8dbdf5b](https://github.com/jhleao/stamp/commit/8dbdf5b00fea956f224990c0a90ebbefc84ddd3c))
+* make Studio feel alive ([bb27210](https://github.com/jhleao/stamp/commit/bb27210088cb963f2b6ce9ff6d288365114a63fc))
+* put projects on Drive ([7b6a64c](https://github.com/jhleao/stamp/commit/7b6a64c1f57170115a4388d2b9784f88a657c502))

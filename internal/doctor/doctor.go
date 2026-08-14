@@ -5,9 +5,9 @@ import (
 	"os/exec"
 	"runtime"
 
-	stampdrive "github.com/weve-ai/stamp/internal/drive"
-	"github.com/weve-ai/stamp/internal/render"
-	"github.com/weve-ai/stamp/internal/theme"
+	stampdrive "github.com/jhleao/stamp/internal/drive"
+	"github.com/jhleao/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/theme"
 )
 
 type Check struct {

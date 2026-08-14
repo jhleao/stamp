@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/weve-ai/stamp/internal/bundle"
-	"github.com/weve-ai/stamp/internal/notion"
-	"github.com/weve-ai/stamp/internal/project"
-	"github.com/weve-ai/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/bundle"
+	"github.com/jhleao/stamp/internal/notion"
+	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
 )
 
 const stateName = "notion.json"

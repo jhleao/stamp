@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jhleao/stamp/internal/project"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weve-ai/stamp/internal/project"
 )
 
 func TestServerHasSmallToolSurface(t *testing.T) {

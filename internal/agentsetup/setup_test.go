@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/weve-ai/stamp/internal/agent"
-	"github.com/weve-ai/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/agent"
+	"github.com/jhleao/stamp/internal/project"
 )
 
 func TestSetupCreatesClaudeLinkAndMergesMCPConfig(t *testing.T) {

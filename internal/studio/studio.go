@@ -23,15 +23,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/weve-ai/stamp/internal/agent"
-	"github.com/weve-ai/stamp/internal/bundle"
-	"github.com/weve-ai/stamp/internal/collab"
-	stampdrive "github.com/weve-ai/stamp/internal/drive"
-	"github.com/weve-ai/stamp/internal/notion"
-	"github.com/weve-ai/stamp/internal/notioncollab"
-	"github.com/weve-ai/stamp/internal/project"
-	"github.com/weve-ai/stamp/internal/render"
-	"github.com/weve-ai/stamp/internal/theme"
+	"github.com/jhleao/stamp/internal/agent"
+	"github.com/jhleao/stamp/internal/bundle"
+	"github.com/jhleao/stamp/internal/collab"
+	stampdrive "github.com/jhleao/stamp/internal/drive"
+	"github.com/jhleao/stamp/internal/notion"
+	"github.com/jhleao/stamp/internal/notioncollab"
+	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/theme"
 )
 
 //go:embed static/*

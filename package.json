@@ -14,15 +14,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jhleao/steamp.git"
+    "url": "git+https://github.com/jhleao/stamp.git"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/jhleao/steamp/issues"
+    "url": "https://github.com/jhleao/stamp/issues"
   },
-  "homepage": "https://github.com/jhleao/steamp#readme",
+  "homepage": "https://github.com/jhleao/stamp#readme",
   "dependencies": {
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",

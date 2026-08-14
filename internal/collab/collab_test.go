@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/weve-ai/stamp/internal/bundle"
-	stampdrive "github.com/weve-ai/stamp/internal/drive"
-	"github.com/weve-ai/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/bundle"
+	stampdrive "github.com/jhleao/stamp/internal/drive"
+	"github.com/jhleao/stamp/internal/project"
 )
 
 type fakeDrive struct {

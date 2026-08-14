@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/weve-ai/stamp/internal/notion"
-	"github.com/weve-ai/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/notion"
+	"github.com/jhleao/stamp/internal/render"
 )
 
 // This live test is intentionally opt-in. It exercises the private test page

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jhleao/stamp/internal/project"
+	stamptheme "github.com/jhleao/stamp/internal/theme"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weve-ai/stamp/internal/project"
-	stamptheme "github.com/weve-ai/stamp/internal/theme"
 )
 
 func TestRoutesServeProjectBoundMCP(t *testing.T) {

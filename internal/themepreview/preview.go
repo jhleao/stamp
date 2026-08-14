@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/weve-ai/stamp/internal/project"
-	"github.com/weve-ai/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
 )
 
 // All renders a standalone theme's visual examples into <theme>/outputs.

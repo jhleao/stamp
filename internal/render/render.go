@@ -29,7 +29,7 @@ import (
 	"golang.org/x/net/html/atom"
 	"gopkg.in/yaml.v3"
 
-	"github.com/weve-ai/stamp/internal/theme"
+	"github.com/jhleao/stamp/internal/theme"
 )
 
 type Result struct {

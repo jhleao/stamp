@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jhleao/stamp/internal/collab"
+	"github.com/jhleao/stamp/internal/doctor"
+	stampdrive "github.com/jhleao/stamp/internal/drive"
+	"github.com/jhleao/stamp/internal/notion"
+	"github.com/jhleao/stamp/internal/notioncollab"
+	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
+	"github.com/jhleao/stamp/internal/themepreview"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/weve-ai/stamp/internal/collab"
-	"github.com/weve-ai/stamp/internal/doctor"
-	stampdrive "github.com/weve-ai/stamp/internal/drive"
-	"github.com/weve-ai/stamp/internal/notion"
-	"github.com/weve-ai/stamp/internal/notioncollab"
-	"github.com/weve-ai/stamp/internal/project"
-	"github.com/weve-ai/stamp/internal/render"
-	"github.com/weve-ai/stamp/internal/themepreview"
 )
 
 type noInput struct{}

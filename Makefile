@@ -2,7 +2,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 PICKER_API_KEY ?=
 GO_LDFLAGS := -X main.version=$(VERSION)
 ifneq ($(strip $(PICKER_API_KEY)),)
-GO_LDFLAGS += -X github.com/weve-ai/stamp/internal/drive.DefaultPickerAPIKey=$(PICKER_API_KEY)
+GO_LDFLAGS += -X github.com/jhleao/stamp/internal/drive.DefaultPickerAPIKey=$(PICKER_API_KEY)
 endif
 
 .PHONY: frontend build test smoke stress install

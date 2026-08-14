@@ -1,4 +1,4 @@
-module github.com/weve-ai/stamp
+module github.com/jhleao/stamp
 
 go 1.25.0
 
