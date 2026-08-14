@@ -7,6 +7,7 @@ import (
 
 	stampdrive "github.com/weve-ai/stamp/internal/drive"
 	"github.com/weve-ai/stamp/internal/render"
+	"github.com/weve-ai/stamp/internal/theme"
 )
 
 type Check struct {
@@ -23,9 +24,20 @@ func Run() []Check {
 	checks = append(checks, executable("LibreOffice", path, err))
 	path, err = exec.LookPath("pandoc")
 	checks = append(checks, executable("Pandoc", path, err))
-	config := stampdrive.ConfigPath()
-	_, err = os.Stat(config)
-	checks = append(checks, Check{Name: "Google OAuth config", OK: err == nil, Detail: config})
+	root, _ := os.Getwd()
+	path, _ = theme.Compiler(root)
+	if path == "" {
+		err = exec.ErrNotFound
+	} else {
+		err = nil
+	}
+	checks = append(checks, executable("Tailwind", path, err))
+	credentials, credentialErr := stampdrive.Credentials()
+	detail := string(credentials.Source)
+	if credentials.Path != "" {
+		detail += " (" + credentials.Path + ")"
+	}
+	checks = append(checks, Check{Name: "Google OAuth", OK: credentialErr == nil, Detail: detail})
 	return checks
 }
 

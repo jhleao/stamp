@@ -30,10 +30,20 @@ func PackFile(root, destination string) error {
 }
 
 func Pack(root string, destination io.Writer) error {
-	return PackWith(root, destination, nil)
+	return packWith(root, destination, nil, false)
 }
 
 func PackWith(root string, destination io.Writer, extra map[string][]byte) error {
+	return packWith(root, destination, extra, false)
+}
+
+// PackSource creates a portable source revision without derived outputs.
+// Backends upload outputs separately so rendering never dirties a source lease.
+func PackSource(root string, destination io.Writer) error {
+	return packWith(root, destination, nil, true)
+}
+
+func packWith(root string, destination io.Writer, extra map[string][]byte, skipOutputs bool) error {
 	archive := zip.NewWriter(destination)
 	count := 0
 	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -51,12 +61,30 @@ func PackWith(root string, destination io.Writer, extra map[string][]byte) error
 			if rel == ".stamp" || strings.HasPrefix(rel, ".stamp"+string(filepath.Separator)) {
 				return filepath.SkipDir
 			}
+			if skipOutputs && rel == "outputs" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing symlink %s", rel)
+			target, readErr := os.Readlink(path)
+			if filepath.ToSlash(rel) != "CLAUDE.md" || readErr != nil || target != "AGENTS.md" {
+				return fmt.Errorf("refusing symlink %s", rel)
+			}
+			count++
+			if count > maxFiles {
+				return fmt.Errorf("project has more than %d files", maxFiles)
+			}
+			header := &zip.FileHeader{Name: "CLAUDE.md", Method: zip.Store}
+			header.SetMode(os.ModeSymlink | 0o777)
+			writer, err := archive.CreateHeader(header)
+			if err != nil {
+				return err
+			}
+			_, err = writer.Write([]byte(target))
+			return err
 		}
-		info, err := entry.Info()
+		info, err := os.Stat(path)
 		if err != nil {
 			return err
 		}
@@ -134,7 +162,7 @@ func unpack(files []*zip.File, destination string) error {
 	var total uint64
 	for _, file := range files {
 		name := filepath.FromSlash(file.Name)
-		if file.FileInfo().IsDir() || file.Mode()&os.ModeSymlink != 0 {
+		if file.FileInfo().IsDir() {
 			return fmt.Errorf("archive contains unsupported entry %q", file.Name)
 		}
 		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
@@ -150,6 +178,30 @@ func unpack(files []*zip.File, destination string) error {
 		target := filepath.Join(destination, name)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
+		}
+		if file.Mode()&os.ModeSymlink != 0 {
+			if file.Name != "CLAUDE.md" || file.UncompressedSize64 > 64 {
+				return fmt.Errorf("archive contains unsupported symlink %q", file.Name)
+			}
+			reader, err := file.Open()
+			if err != nil {
+				return err
+			}
+			linkTarget, readErr := io.ReadAll(io.LimitReader(reader, 65))
+			closeErr := reader.Close()
+			if readErr != nil {
+				return readErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if string(linkTarget) != "AGENTS.md" {
+				return fmt.Errorf("CLAUDE.md has unsafe symlink target")
+			}
+			if err := os.Symlink("AGENTS.md", target); err != nil {
+				return err
+			}
+			continue
 		}
 		reader, err := file.Open()
 		if err != nil {

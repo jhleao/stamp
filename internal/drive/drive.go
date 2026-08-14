@@ -21,10 +21,31 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
 const keychainService = "sh.stamp.google-drive"
+
+const (
+	defaultClientID     = "REMOVED_GOOGLE_OAUTH_CLIENT_ID"
+	defaultClientSecret = "REMOVED_GOOGLE_OAUTH_CLIENT_SECRET"
+)
+
+type CredentialSource string
+
+const (
+	CredentialDefault     CredentialSource = "Stamp default"
+	CredentialInstalled   CredentialSource = "organization override"
+	CredentialEnvironment CredentialSource = "environment override"
+)
+
+type CredentialInfo struct {
+	Source   CredentialSource
+	Path     string
+	ClientID string
+	Scope    string
+}
 
 type Client struct {
 	api      *drive.Service
@@ -56,6 +77,10 @@ func ConfigPath() string {
 	if path := os.Getenv("STAMP_GOOGLE_OAUTH_CONFIG"); path != "" {
 		return path
 	}
+	return OverridePath()
+}
+
+func OverridePath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "Application Support", "Stamp", "google-oauth.json")
 }
@@ -69,7 +94,7 @@ func InstallConfig(source string) (string, error) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return "", fmt.Errorf("read OAuth JSON: %w", err)
 	}
-	if file.Installed.ClientID == "" || file.Installed.ClientSecret == "" {
+	if file.Installed.ClientID == "" {
 		return "", errors.New("not a Google OAuth Desktop app JSON file")
 	}
 	destination := ConfigPath()
@@ -85,6 +110,23 @@ func InstallConfig(source string) (string, error) {
 	return destination, nil
 }
 
+func ResetConfig() (string, error) {
+	path := OverridePath()
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	_ = os.Remove(filepath.Dir(path))
+	return path, nil
+}
+
+func Credentials() (CredentialInfo, error) {
+	file, source, path, err := credentialFile()
+	if err != nil {
+		return CredentialInfo{}, err
+	}
+	return CredentialInfo{Source: source, Path: path, ClientID: file.Installed.ClientID, Scope: drive.DriveFileScope}, nil
+}
+
 func Login(ctx context.Context) (string, error) {
 	config, clientID, err := oauthConfig()
 	if err != nil {
@@ -97,7 +139,12 @@ func Login(ctx context.Context) (string, error) {
 	defer listener.Close()
 	config.RedirectURL = "http://" + listener.Addr().String() + "/oauth/callback"
 	state := randomToken()
-	code := make(chan string, 1)
+	verifier := oauth2.GenerateVerifier()
+	type loginResult struct {
+		code string
+		err  error
+	}
+	result := make(chan loginResult, 1)
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second}
 	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/callback" || r.URL.Query().Get("state") != state {
@@ -106,29 +153,37 @@ func Login(ctx context.Context) (string, error) {
 		}
 		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
 			http.Error(w, oauthErr, http.StatusBadRequest)
+			select {
+			case result <- loginResult{err: fmt.Errorf("Google login was denied: %s", oauthErr)}:
+			default:
+			}
 			return
 		}
 		select {
-		case code <- r.URL.Query().Get("code"):
+		case result <- loginResult{code: r.URL.Query().Get("code")}:
 		default:
 		}
 		_, _ = io.WriteString(w, "Stamp is connected. You can close this tab.")
 	})
 	go server.Serve(listener)
-	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce, oauth2.S256ChallengeOption(verifier))
 	if err := exec.Command("open", authURL).Start(); err != nil {
 		return "", fmt.Errorf("open browser: %w", err)
 	}
 	var authCode string
 	select {
-	case authCode = <-code:
+	case login := <-result:
+		if login.err != nil {
+			return "", login.err
+		}
+		authCode = login.code
 	case <-time.After(3 * time.Minute):
-		return "", errors.New("Google login timed out")
+		return "", errors.New("Google login did not complete; if Google says Stamp is being tested, add this account under Google Auth Platform > Audience > Test users, or make the app Internal")
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
 	_ = server.Shutdown(context.Background())
-	token, err := config.Exchange(ctx, authCode)
+	token, err := config.Exchange(ctx, authCode, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return "", fmt.Errorf("exchange Google login: %w", err)
 	}
@@ -180,6 +235,10 @@ func (c *Client) InitSpace(ctx context.Context, value, name string) (Item, error
 	id := ID(value)
 	item, err := c.Get(ctx, id)
 	if err != nil {
+		var apiErr *googleapi.Error
+		if errors.As(err, &apiErr) && (apiErr.Code == http.StatusForbidden || apiErr.Code == http.StatusNotFound) {
+			return Item{}, errors.New("that folder is not authorized for Stamp; run stamp space pick and choose it in Google Drive")
+		}
 		return Item{}, err
 	}
 	if !item.Folder {
@@ -364,24 +423,64 @@ func ID(value string) string {
 }
 
 func oauthConfig() (*oauth2.Config, string, error) {
-	data, err := os.ReadFile(ConfigPath())
+	file, _, _, err := credentialFile()
 	if err != nil {
-		return nil, "", fmt.Errorf("read Google OAuth config %s: %w", ConfigPath(), err)
-	}
-	var file OAuthFile
-	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, "", err
 	}
 	installed := file.Installed
-	if installed.ClientID == "" || installed.ClientSecret == "" {
-		return nil, "", errors.New("Google OAuth config needs installed client credentials")
+	if installed.ClientID == "" {
+		return nil, "", errors.New("Google OAuth config needs a desktop client ID")
+	}
+	authURL, tokenURL := installed.AuthURI, installed.TokenURI
+	if authURL == "" {
+		authURL = "https://accounts.google.com/o/oauth2/auth"
+	}
+	if tokenURL == "" {
+		tokenURL = "https://oauth2.googleapis.com/token"
 	}
 	config := &oauth2.Config{
 		ClientID: installed.ClientID, ClientSecret: installed.ClientSecret,
-		Endpoint: oauth2.Endpoint{AuthURL: installed.AuthURI, TokenURL: installed.TokenURI},
-		Scopes:   []string{drive.DriveScope},
+		Endpoint: oauth2.Endpoint{AuthURL: authURL, TokenURL: tokenURL},
+		Scopes:   []string{drive.DriveFileScope},
 	}
 	return config, installed.ClientID, nil
+}
+
+func credentialFile() (OAuthFile, CredentialSource, string, error) {
+	if path := os.Getenv("STAMP_GOOGLE_OAUTH_CONFIG"); path != "" {
+		file, err := readCredentialFile(path)
+		return file, CredentialEnvironment, path, err
+	}
+	if path := OverridePath(); fileExists(path) {
+		file, err := readCredentialFile(path)
+		return file, CredentialInstalled, path, err
+	}
+	var file OAuthFile
+	file.Installed.ClientID = defaultClientID
+	file.Installed.ClientSecret = defaultClientSecret
+	file.Installed.AuthURI = "https://accounts.google.com/o/oauth2/auth"
+	file.Installed.TokenURI = "https://oauth2.googleapis.com/token"
+	return file, CredentialDefault, "built into stamp", nil
+}
+
+func readCredentialFile(path string) (OAuthFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return OAuthFile{}, fmt.Errorf("read Google OAuth config %s: %w", path, err)
+	}
+	var file OAuthFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return OAuthFile{}, fmt.Errorf("read Google OAuth config %s: %w", path, err)
+	}
+	if file.Installed.ClientID == "" {
+		return OAuthFile{}, errors.New("Google OAuth config needs a desktop client ID")
+	}
+	return file, nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func loadToken(account string) (*oauth2.Token, error) {

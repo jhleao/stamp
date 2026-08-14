@@ -1,0 +1,45 @@
+{
+  "name": "stamp",
+  "version": "1.0.0",
+  "description": "Stamp is a small macOS utility for making document packs with people and agents. It keeps a project in one revisioned Google Drive file, works on ordinary local files, renders PDFs and XLSX files with established tools, and exposes the same small workflow through a CLI, a local Studio, and MCP.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config studio/vite.config.ts",
+    "build:studio": "vite build --config studio/vite.config.ts",
+    "theme:stress": "tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/page.css --minify && tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/deck.css --minify",
+    "test:studio": "vitest run --config studio/vite.config.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhleao/steamp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jhleao/steamp/issues"
+  },
+  "homepage": "https://github.com/jhleao/steamp#readme",
+  "dependencies": {
+    "@fontsource/geist-mono": "^5.3.0",
+    "@fontsource/geist-sans": "^5.3.0",
+    "@preact/signals": "^2.11.0",
+    "monaco-editor": "^0.52.2",
+    "pdfjs-dist": "^6.2.108",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/preact": "^3.2.4",
+    "@types/node": "^26.2.0",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

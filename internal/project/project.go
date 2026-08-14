@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -42,6 +43,10 @@ type ProjectStatus struct {
 }
 
 func Create(root, name string) (Manifest, error) {
+	return CreateWithTheme(root, name, "")
+}
+
+func CreateWithTheme(root, name, themeDir string) (Manifest, error) {
 	if name == "" {
 		name = filepath.Base(root)
 	}
@@ -56,7 +61,7 @@ func Create(root, name string) (Manifest, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Manifest{}, err
 	}
-	for _, dir := range []string{"documents", "decks", "spreadsheets", "theme/examples", "assets", "outputs", ".stamp"} {
+	for _, dir := range []string{"documents", "decks", "spreadsheets", "theme/components", "theme/examples", "assets", "outputs", ".stamp"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return Manifest{}, err
 		}
@@ -65,20 +70,151 @@ func Create(root, name string) (Manifest, error) {
 	if err := writeYAML(filepath.Join(root, ManifestName), manifest); err != nil {
 		return Manifest{}, err
 	}
-	files := map[string]string{
-		"theme/page.html.tmpl":                pageTemplate,
-		"theme/deck.html.tmpl":                deckTemplate,
-		"theme/page.css":                      pageCSS,
-		"theme/deck.css":                      deckCSS,
-		"theme/examples/welcome-page.page.md": "---\ntitle: Welcome\n---\n# Welcome\n\nThis is a new Stamp project.\n\n<callout>Change the words, CSS, or template and preview it again.</callout>\n",
-		"theme/examples/welcome-deck.deck.md": "---\ntitle: Welcome deck\n---\n<slide>\n\n# Welcome\n\nA small deck made with Stamp.\n\n</slide>\n\n<slide>\n\n## One source, one preview\n\n- Edit ordinary files\n- Push one complete version\n\n</slide>\n",
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(agentGuide), 0o644); err != nil {
+		return Manifest{}, err
 	}
-	for name, contents := range files {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+	if err := EnsureAgentCompatibility(root); err != nil {
+		return Manifest{}, err
+	}
+	if themeDir != "" {
+		if err := copyTheme(themeDir, filepath.Join(root, "theme")); err != nil {
+			return Manifest{}, err
+		}
+	} else {
+		if err := WriteStarterTheme(filepath.Join(root, "theme")); err != nil {
+			return Manifest{}, err
+		}
+	}
+	for name, contents := range map[string]string{
+		"documents/start-here.page.md": starterPage,
+		"decks/start-here.deck.md":     starterDeck,
+	} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(contents), 0o644); err != nil {
 			return Manifest{}, err
 		}
 	}
 	return manifest, nil
+}
+
+// EnsureAgentCompatibility lets Claude Code consume the same canonical
+// instructions as agents that read AGENTS.md. Existing custom CLAUDE.md files
+// are preserved; archives containing the dereferenced guide are restored to a
+// local symlink after opening or pulling.
+func EnsureAgentCompatibility(root string) error {
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	if _, err := os.Stat(agentsPath); errors.Is(err, os.ErrNotExist) {
+		if writeErr := os.WriteFile(agentsPath, []byte(agentGuide), 0o644); writeErr != nil {
+			return writeErr
+		}
+	} else if err != nil {
+		return err
+	}
+	claudePath := filepath.Join(root, "CLAUDE.md")
+	info, err := os.Lstat(claudePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.Symlink("AGENTS.md", claudePath)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(claudePath)
+		if err != nil {
+			return err
+		}
+		if target == "AGENTS.md" {
+			return nil
+		}
+		return fmt.Errorf("CLAUDE.md points to %s; expected AGENTS.md", target)
+	}
+	claude, readErr := os.ReadFile(claudePath)
+	agents, agentsErr := os.ReadFile(agentsPath)
+	if readErr != nil || agentsErr != nil || string(claude) != string(agents) {
+		return nil
+	}
+	if err := os.Remove(claudePath); err != nil {
+		return err
+	}
+	return os.Symlink("AGENTS.md", claudePath)
+}
+
+func WriteStarterTheme(root string) error {
+	for _, dir := range []string{"components", "examples"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			return err
+		}
+	}
+	files := []struct{ name, contents string }{
+		// These bootstraps make the folder self-describing before its first
+		// preview. Tailwind authoring sources are written afterwards, marking
+		// both generated files for a real compile on first Studio/CLI use.
+		{"page.css", pageCSS},
+		{"deck.css", deckCSS},
+		{"page.html.tmpl", pageTemplate},
+		{"deck.html.tmpl", deckTemplate},
+		{"tailwind.css", tailwindSource},
+		{"components/callout.tsx", `export default function Callout({ children }) {
+  return (
+    <aside className="callout my-6 border-y border-stone-300 bg-stone-50 px-5 py-4 text-sm leading-relaxed">
+      {children}
+    </aside>
+  );
+}
+`},
+		{"README.md", themeGuide},
+		{"examples/welcome-page.page.md", "---\ntitle: Welcome\n---\n# Welcome\n\nThis is a new Stamp project.\n\n<callout>Change the words, components, or Tailwind theme and watch this preview update.</callout>\n"},
+		{"examples/welcome-deck.deck.md", "---\ntitle: Welcome deck\n---\n<slide>\n\n# Welcome\n\nA small deck made with Stamp.\n\n</slide>\n\n<slide>\n\n## One source, one preview\n\n- Edit ordinary files\n- Push one complete version\n\n</slide>\n"},
+	}
+	for _, file := range files {
+		path := filepath.Join(root, filepath.FromSlash(file.name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(file.contents), 0o644); err != nil {
+			return err
+		}
+	}
+	stale := time.Now().Add(-time.Second)
+	for _, name := range []string{"page.css", "deck.css"} {
+		if err := os.Chtimes(filepath.Join(root, name), stale, stale); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyTheme(source, destination string) error {
+	source, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Stat(filepath.Join(source, "page.html.tmpl")); err != nil || info.IsDir() {
+		return fmt.Errorf("%s is not a Stamp theme (page.html.tmpl is missing)", source)
+	}
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, rel)
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("theme may not contain symlink %s", rel)
+		}
+		if entry.IsDir() {
+			if rel == "outputs" || rel == ".stamp" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 func Load(root string) (Manifest, error) {
@@ -155,6 +291,31 @@ func WriteState(root string, state RemoteState) error {
 	return os.WriteFile(filepath.Join(root, ".stamp", "state.json"), data, 0o600)
 }
 
+func Connected(root string) (bool, error) {
+	state, err := ReadState(root)
+	if err != nil {
+		return false, err
+	}
+	if state.FileID != "" && state.ProjectFolderID != "" && state.CurrentFolderID != "" && state.BaseVersion != "" {
+		return true, nil
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".stamp", "notion.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var notionState struct {
+		PageID   string `json:"pageId"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.Unmarshal(data, &notionState); err != nil {
+		return false, fmt.Errorf("read Notion project state: %w", err)
+	}
+	return notionState.PageID != "" && notionState.Revision > 0, nil
+}
+
 func FileHashes(root string) (map[string]string, error) {
 	files := map[string]string{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -172,7 +333,13 @@ func FileHashes(root string) (map[string]string, error) {
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
+			if filepath.ToSlash(rel) != "CLAUDE.md" {
+				return nil
+			}
+			target, readErr := os.Readlink(path)
+			if readErr != nil || target != "AGENTS.md" {
+				return nil
+			}
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -198,7 +365,7 @@ func Status(root string) (ProjectStatus, error) {
 	if err != nil {
 		return ProjectStatus{}, err
 	}
-	dirty := len(state.Files) > 0 && !equalHashes(hashes, state.Files)
+	dirty := state.FileID == "" || !equalHashes(hashes, state.Files)
 	lease := state.BaseVersion
 	if lease == "" {
 		lease = "local only"
@@ -247,18 +414,69 @@ func newID() string {
 
 const pageTemplate = `<!doctype html>
 <html><head><meta charset="utf-8"><base href="{{.BaseURL}}"><title>{{.Title}}</title><style>{{.CSS}}</style></head>
-<body><main>{{.Content}}</main></body></html>`
+<body class="bg-stone-50 text-stone-900 antialiased"><main class="stamp-page mx-auto max-w-[72rem] px-[18mm] py-[15mm]">{{.Content}}</main></body></html>`
 
 const deckTemplate = `<!doctype html>
 <html><head><meta charset="utf-8"><base href="{{.BaseURL}}"><title>{{.Title}}</title><style>{{.CSS}}</style></head>
-<body>{{.Content}}</body></html>`
+<body class="stamp-deck bg-stone-950 text-stone-50 antialiased">{{.Content}}</body></html>`
+
+const starterPage = `---
+title: Start here
+---
+
+# Start here
+
+Replace this with the first useful thing your team needs to say.
+`
+
+const starterDeck = `---
+title: Start here
+---
+
+<slide>
+
+# Start here
+
+Replace this with the first useful story your team needs to present.
+
+</slide>
+`
+
+const tailwindSource = `@import "tailwindcss" source("./");
+
+@theme {
+  --font-sans: "Avenir Next", Avenir, sans-serif;
+}
+
+@page { size: A4; margin: 0; }
+@page deck { size: 13.333in 7.5in; margin: 0; }
+
+@layer base {
+  html { font-family: var(--font-sans); print-color-adjust: exact; }
+  body { margin: 0; }
+  h1 { @apply mb-6 text-4xl font-semibold leading-none tracking-tight; }
+  h2 { @apply mt-8 mb-4 text-2xl font-semibold tracking-tight; }
+  p, li { @apply leading-relaxed; }
+  img { @apply max-w-full; }
+}
+
+@layer components {
+  .stamp-page { min-height: 297mm; }
+  .stamp-deck { page: deck; }
+  .stamp-deck > slide { @apply flex h-[7.5in] w-[13.333in] flex-col overflow-hidden p-[.75in]; break-after: page; }
+  .stamp-deck > slide:last-child { break-after: auto; }
+  .stamp-deck h1 { @apply text-6xl; }
+  .stamp-deck h2 { @apply text-4xl; }
+  .stamp-deck p, .stamp-deck li { @apply text-2xl; }
+}
+`
 
 const pageCSS = `@page { size: A4; margin: 18mm; }
 :root { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #171717; }
 body { margin: 0; line-height: 1.5; }
 h1 { font-size: 34px; line-height: 1.05; margin: 0 0 24px; }
 h2 { margin-top: 32px; }
-callout { display: block; margin: 24px 0; padding: 18px; border-left: 4px solid #7357ff; background: #f3f0ff; }
+.callout { display: block; margin: 24px 0; padding: 18px; border: 1px solid #d9d2ca; background: #f5f1eb; }
 img { max-width: 100%; }
 `
 
@@ -270,4 +488,55 @@ slide:last-child { break-after: auto; }
 h1 { font-size: 54px; line-height: 1.02; margin: 0 0 28px; }
 h2 { font-size: 38px; }
 p, li { font-size: 24px; line-height: 1.35; }
+`
+
+const agentGuide = `# Working with this Stamp project
+
+This workspace is a shared document pack. Keep the loop small:
+
+1. Run ` + "`stamp pull`" + ` before changing an existing shared project.
+2. Edit Markdown in documents/ or decks/, and spreadsheets in spreadsheets/.
+3. Run ` + "`stamp preview`" + ` and inspect outputs/.
+4. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
+
+Run ` + "`stamp agent setup`" + ` once to connect compatible agents to the MCP
+endpoint hosted by ` + "`stamp studio`" + `.
+
+The theme/ folder controls appearance. Read theme/README.md before changing it.
+Never edit outputs/ directly. If pull or push reports a conflict, preserve both
+versions and explain the choice instead of forcing it.
+`
+
+const themeGuide = `# Theme
+
+A Stamp theme is Tailwind utility markup compiled to inert HTML and CSS:
+
+- page.html.tmpl and deck.html.tmpl wrap written pages and slide decks.
+- tailwind.css holds design tokens, shared rules, and print primitives.
+- page.css and deck.css are generated; never hand-edit them.
+- components/<tag>.tsx defines a reusable Markdown tag with familiar Preact-style JSX.
+- examples/ are the theme's visual test cases.
+
+Content stays readable:
+
+    <metric-card value="$4.2M">Up 18% year over year.</metric-card>
+
+The matching components/metric-card.tsx can use:
+
+    export default function MetricCard({ props, children }) {
+      return <figure className="grid grid-cols-[1fr_auto] gap-3 border-y border-stone-300 py-5">
+        <strong className="text-4xl tracking-tight">{props.value}</strong>
+        <figcaption className="col-span-2 text-sm">{children}</figcaption>
+      </figure>;
+    }
+
+Each component receives props (tag attributes), children (its rendered body),
+meta (the document's YAML front matter), and format (page, deck, or component
+for an isolated preview). Ordinary TypeScript expressions can build
+data-driven layouts and inline SVG charts. Components may contain other
+components. Put presentation in Tailwind utilities and local assets; scripts, event
+handlers, remote resources, and shell hooks are intentionally unavailable.
+
+Keep at least one realistic and one stress-test example. Preview every example
+after changing a component or shared style.
 `

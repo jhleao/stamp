@@ -29,7 +29,7 @@ stamp project open <drive-url>
 stamp pull
 stamp studio
 stamp preview
-stamp push -m "update the board pack"
+stamp push --message "update the board pack"
 ```
 
 There is no distinction between save and publish. Local edits are private;
@@ -42,7 +42,7 @@ stamp.yaml
 documents/       # *.page.md and *.doc.md -> PDF
 decks/           # *.deck.md and *.fodp -> PDF
 spreadsheets/    # *.fods -> XLSX; *.xlsx is preserved directly
-theme/           # Go HTML templates, CSS, components, examples
+theme/           # component sources, compiled theme assets, examples
 assets/
 outputs/         # generated and included in the canonical archive
 ```
@@ -84,7 +84,9 @@ service unless real usage proves it necessary.
 
 Use existing wheels:
 
-- Markdown and Go `html/template` for bounded document templates;
+- Markdown and bounded component templates for content composition;
+- Tailwind as the theme authoring system, compiled to ordinary local CSS before
+  a theme is packed or pushed;
 - Chromium for HTML/CSS to PDF;
 - LibreOffice for FODS to XLSX, FODP to PDF, and exact spreadsheet previews;
 - Pandoc plus LibreOffice for DOC.MD compatibility.
@@ -95,10 +97,37 @@ implements a spreadsheet layout or formula engine.
 
 ## Studio
 
-`stamp studio` binds a tokenized server to `127.0.0.1`. It provides a file
-tree, a modest text editor, preview, diagnostics, conflicts, pull, and push.
-Agents remain external through MCP; Studio does not contain chat, a design
-canvas, collaboration primitives, or a frontend framework.
+`stamp studio` binds a tokenized server to `127.0.0.1`. Its Preact, Signals,
+Vite, and Tailwind interface provides a file tree, a restrained Monaco editor,
+preview, diagnostics, conflicts, pull, and push. Agents remain external through
+MCP; Studio does not contain chat, a design canvas, or collaboration primitives.
+
+## Theme authoring
+
+Content and presentation are different products inside one workspace:
+
+```text
+theme/
+  page.html.tmpl       # page shell
+  deck.html.tmpl       # deck shell
+  components/          # shared, named content primitives
+  examples/            # visual fixtures and stress tests
+  tailwind.css         # authoring source: tokens and print primitives
+  page.css             # generated Tailwind output; not hand-authored
+  deck.css             # generated Tailwind output; not hand-authored
+```
+
+Template and component markup may use Tailwind utility classes. Stamp compiles
+the utilities into a static local stylesheet and embeds that stylesheet in the
+rendered artifact. Compilation is an authoring concern; previewing, sharing, and
+opening an already-built project must not fetch a CDN or execute a template's
+JavaScript.
+
+Preact belongs in Studio. Executing arbitrary TSX inside the document renderer
+would make templates code, weaken the security boundary, and require a
+JavaScript runtime in the standalone Go binary. If JSX authoring is added, it
+must compile into the same inert component bundle before the project is shared;
+raw TSX is never the canonical collaboration format.
 
 ## Agent surface
 
@@ -126,7 +155,7 @@ or generalized protocol used once.
 
 Do not build:
 
-- a template programming language;
+- a second general-purpose template programming language;
 - automatic template upgrades;
 - a generic pipeline or storage plugin system;
 - automatic document or spreadsheet merging;

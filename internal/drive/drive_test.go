@@ -3,7 +3,10 @@ package drive
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"google.golang.org/api/drive/v3"
 )
 
 func TestID(t *testing.T) {
@@ -15,6 +18,71 @@ func TestID(t *testing.T) {
 	} {
 		if got := ID(input); got != want {
 			t.Errorf("ID(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestCredentialsUseBundledDefaultWithoutOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", "")
+	info, err := Credentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Source != CredentialDefault || info.ClientID != defaultClientID || info.Scope != drive.DriveFileScope {
+		t.Fatalf("unexpected credentials: %+v", info)
+	}
+}
+
+func TestCredentialsPreferEnvironmentThenInstalledOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	environment := filepath.Join(t.TempDir(), "environment.json")
+	installed := OverridePath()
+	for path, id := range map[string]string{environment: "environment-client", installed: "installed-client"} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"installed":{"client_id":"`+id+`"}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", environment)
+	info, err := Credentials()
+	if err != nil || info.Source != CredentialEnvironment || info.ClientID != "environment-client" {
+		t.Fatalf("environment credentials = %+v, %v", info, err)
+	}
+	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", "")
+	info, err = Credentials()
+	if err != nil || info.Source != CredentialInstalled || info.ClientID != "installed-client" {
+		t.Fatalf("installed credentials = %+v, %v", info, err)
+	}
+	if _, err := ResetConfig(); err != nil {
+		t.Fatal(err)
+	}
+	info, err = Credentials()
+	if err != nil || info.Source != CredentialDefault {
+		t.Fatalf("reset credentials = %+v, %v", info, err)
+	}
+}
+
+func TestOAuthConfigUsesDriveFileScope(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", "")
+	config, _, err := oauthConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Scopes) != 1 || config.Scopes[0] != drive.DriveFileScope {
+		t.Fatalf("scopes = %v", config.Scopes)
+	}
+}
+
+func TestPickerHTMLContainsFolderOnlyFlow(t *testing.T) {
+	html := pickerHTML("token-value", "key-value")
+	for _, want := range []string{"ViewId.FOLDERS", "setSelectFolderEnabled(true)", "token-value", "key-value"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("picker HTML missing %q", want)
 		}
 	}
 }

@@ -5,37 +5,48 @@
 Install Stamp and its three rendering applications:
 
 ```sh
-brew install go pandoc libreoffice
+brew install go node pandoc libreoffice
 brew install --cask google-chrome
-make install
-stamp doctor
+npm install -g @tailwindcss/cli
+npm install && make install
 ```
 
-Create a Google OAuth desktop client as described in [drive.md](drive.md), then
-mark an existing Drive folder as the shared Space:
+Connect Stamp's bundled Google application, then create a shared Space:
 
 ```sh
-stamp google-oauth ~/Downloads/client_secret_....json
+stamp doctor
 stamp login
-stamp space create 'Weve'
+stamp space create 'Product Team'
 ```
 
 Stamp adds only `Projects/` and `Templates/`. There is no server or database.
 
-## 2. Vibe-code a template
+## 2. Start a project
 
 ```sh
-stamp project create board-pack --name 'Board Pack'
-cd board-pack
-stamp studio
+stamp project create board-pack --name 'Board Pack' --space '<Space URL or ID>'
+stamp studio --dir board-pack
 ```
 
-Edit the examples in `theme/examples/` beside `theme/page.html.tmpl`,
-`theme/deck.html.tmpl`, and their CSS. The Studio refreshes the result as files
-change, including changes made by an external coding agent.
+Project creation prepares agent integration automatically. With `--space`, it
+also renders and pushes the initial version; Studio opens only after that
+connection exists. Change its words, then choose
+**Save & preview** when you want a fresh result. Press **Push** when it is ready for other people. An agent pointed at
+the folder reads `AGENTS.md` (or its `CLAUDE.md` compatibility link) and follows
+the same pull → edit → preview → push loop automatically. Studio also hosts the
+project's MCP endpoint, so Claude Code needs no second Stamp process.
 
-Templates are ordinary Go HTML templates. Stamp intentionally has no custom
-template language, component runtime, registry, or package manager.
+To make a reusable theme first:
+
+```sh
+stamp template create my-theme
+# Ask an agent to style my-theme/examples and add components.
+stamp template preview my-theme
+stamp project create board-pack --name 'Board Pack' --template my-theme --space '<Space URL or ID>'
+```
+
+Themes are ordinary HTML templates, Tailwind utilities, assets, examples, and small reusable
+components. Read [templates.md](templates.md) for the complete format.
 
 ## 3. Make and preview the pack
 
@@ -70,10 +81,12 @@ The other person opens the Drive project once:
 ```sh
 stamp project open '<project folder or .stamp URL>' --dir board-pack
 cd board-pack
-stamp pull
 stamp studio
 stamp push --message 'tighten the narrative'
 ```
+
+Opening a project already downloads its current version. On later visits, Pull
+lights up only when Drive has something newer.
 
 Pull replaces a clean workspace. If local and Drive both changed, it refuses.
 Use `stamp pull --incoming` to inspect the remote files beside local work, or

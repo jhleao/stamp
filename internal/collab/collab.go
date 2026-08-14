@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 	"github.com/weve-ai/stamp/internal/render"
 )
 
-const stampMIME = "application/vnd.weve.stamp+zip"
+const stampMIME = "application/vnd.stamp+zip"
 
 type VersionInfo struct {
 	Message       string `json:"message,omitempty"`
@@ -30,13 +31,28 @@ type VersionInfo struct {
 
 type PullMode string
 
+// Drive is the small storage surface collaboration needs. Keeping it here
+// makes the conflict and recovery rules testable without a Google account.
+type Drive interface {
+	Get(context.Context, string) (stampdrive.Item, error)
+	Download(context.Context, string) ([]byte, error)
+	FindChildByProperty(context.Context, string, string, string) (stampdrive.Item, bool, error)
+	EnsureFolder(context.Context, string, string, map[string]string) (stampdrive.Item, error)
+	CreateFile(context.Context, string, string, string, io.Reader, map[string]string) (stampdrive.Item, error)
+	UpdateFile(context.Context, string, string, io.Reader) (stampdrive.Item, error)
+	UpdateNamedFile(context.Context, string, string, string, io.Reader) (stampdrive.Item, error)
+	Children(context.Context, string) ([]stampdrive.Item, error)
+	Trash(context.Context, string) error
+	Retain(context.Context, stampdrive.Item) error
+}
+
 const (
 	PullSafe     PullMode = "safe"
 	PullIncoming PullMode = "incoming"
 	PullReplace  PullMode = "replace"
 )
 
-func Open(ctx context.Context, drive *stampdrive.Client, value, destination string) (project.RemoteState, error) {
+func Open(ctx context.Context, drive Drive, value, destination string) (project.RemoteState, error) {
 	item, err := drive.Get(ctx, stampdrive.ID(value))
 	if err != nil {
 		return project.RemoteState{}, err
@@ -74,10 +90,10 @@ func Open(ctx context.Context, drive *stampdrive.Client, value, destination stri
 	if err != nil {
 		return project.RemoteState{}, err
 	}
-	if err := os.MkdirAll(destination, 0o755); err != nil {
+	if err := unpackNewWorkspace(contents, destination); err != nil {
 		return project.RemoteState{}, err
 	}
-	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), destination); err != nil {
+	if err := project.EnsureAgentCompatibility(destination); err != nil {
 		return project.RemoteState{}, err
 	}
 	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
@@ -95,7 +111,26 @@ func Open(ctx context.Context, drive *stampdrive.Client, value, destination stri
 	return state, project.WriteState(destination, state)
 }
 
-func Pull(ctx context.Context, drive *stampdrive.Client, root string, mode PullMode) (string, error) {
+func unpackNewWorkspace(contents []byte, destination string) error {
+	parent := filepath.Dir(destination)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(parent, ".stamp-open-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), staging); err != nil {
+		return fmt.Errorf("validate remote project: %w", err)
+	}
+	if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(staging, destination)
+}
+
+func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string, error) {
 	state, err := project.ReadState(root)
 	if err != nil {
 		return "", err
@@ -147,6 +182,9 @@ func Pull(ctx context.Context, drive *stampdrive.Client, root string, mode PullM
 	if err := replaceWorkspace(root, contents); err != nil {
 		return "", err
 	}
+	if err := project.EnsureAgentCompatibility(root); err != nil {
+		return "", err
+	}
 	hashes, err = project.FileHashes(root)
 	if err != nil {
 		return "", err
@@ -158,7 +196,7 @@ func Pull(ctx context.Context, drive *stampdrive.Client, root string, mode PullM
 	return "Pulled Drive version " + remote.Version, nil
 }
 
-func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message, forceLease string) (project.RemoteState, error) {
+func Push(ctx context.Context, drive Drive, root, spaceID, message, forceLease string) (project.RemoteState, error) {
 	manifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
@@ -186,11 +224,8 @@ func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message,
 			return project.RemoteState{}, err
 		}
 		remoteVersion = remote.Version
-		if state.BaseVersion != "" && remoteVersion != state.BaseVersion && forceLease != remoteVersion {
-			return project.RemoteState{}, fmt.Errorf("push refused: workspace lease is %s but Drive is %s; pull first, or use --force-with-lease %s after reviewing it", state.BaseVersion, remoteVersion, remoteVersion)
-		}
-		if forceLease != "" && forceLease != remoteVersion {
-			return project.RemoteState{}, fmt.Errorf("force lease %s is stale; Drive is %s", forceLease, remoteVersion)
+		if err := checkLease(state.BaseVersion, remoteVersion, forceLease); err != nil {
+			return project.RemoteState{}, err
 		}
 	}
 	version := VersionInfo{Message: message, CreatedAt: time.Now().UTC().Format(time.RFC3339), ParentVersion: remoteVersion}
@@ -226,7 +261,57 @@ func Push(ctx context.Context, drive *stampdrive.Client, root, spaceID, message,
 	return state, nil
 }
 
-func createRemote(ctx context.Context, drive *stampdrive.Client, manifest project.Manifest, spaceID string, state *project.RemoteState) error {
+// Reconnect preserves the previous remote state as local recovery metadata and
+// publishes the workspace as a new Drive project. The old Drive project is not
+// modified. This is primarily useful when changing OAuth applications because
+// drive.file grants do not transfer between client IDs.
+func Reconnect(ctx context.Context, drive Drive, root, spaceID, message string) (project.RemoteState, string, error) {
+	if strings.TrimSpace(spaceID) == "" {
+		return project.RemoteState{}, "", errors.New("reconnect needs --space <space-id-or-url>")
+	}
+	previous, err := project.ReadState(root)
+	if err != nil {
+		return project.RemoteState{}, "", err
+	}
+	if previous.FileID == "" {
+		return project.RemoteState{}, "", errors.New("project is local-only; use stamp push --space instead")
+	}
+	recoveryDir := filepath.Join(root, ".stamp", "recovery")
+	if err := os.MkdirAll(recoveryDir, 0o700); err != nil {
+		return project.RemoteState{}, "", err
+	}
+	recovery := filepath.Join(recoveryDir, "drive-link-"+time.Now().UTC().Format("20060102T150405Z")+".json")
+	data, err := json.MarshalIndent(previous, "", "  ")
+	if err != nil {
+		return project.RemoteState{}, "", err
+	}
+	if err := os.WriteFile(recovery, append(data, '\n'), 0o600); err != nil {
+		return project.RemoteState{}, "", err
+	}
+	if err := project.WriteState(root, project.RemoteState{}); err != nil {
+		return project.RemoteState{}, recovery, err
+	}
+	state, err := Push(ctx, drive, root, spaceID, message, "")
+	if err != nil {
+		if restoreErr := project.WriteState(root, previous); restoreErr != nil {
+			return project.RemoteState{}, recovery, fmt.Errorf("reconnect failed: %v; restore previous Drive link: %w", err, restoreErr)
+		}
+		return project.RemoteState{}, recovery, err
+	}
+	return state, recovery, nil
+}
+
+func checkLease(local, remote, forced string) error {
+	if local != "" && remote != local && forced != remote {
+		return fmt.Errorf("push refused: workspace lease is %s but Drive is %s; pull first, or use --force-with-lease %s after reviewing it", local, remote, remote)
+	}
+	if forced != "" && forced != remote {
+		return fmt.Errorf("force lease %s is stale; Drive is %s", forced, remote)
+	}
+	return nil
+}
+
+func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, spaceID string, state *project.RemoteState) error {
 	projects, err := drive.EnsureFolder(ctx, spaceID, "Projects", map[string]string{"stamp_kind": "projects"})
 	if err != nil {
 		return err
@@ -243,7 +328,7 @@ func createRemote(ctx context.Context, drive *stampdrive.Client, manifest projec
 	return nil
 }
 
-func syncOutputs(ctx context.Context, drive *stampdrive.Client, root, folderID string) error {
+func syncOutputs(ctx context.Context, drive Drive, root, folderID string) error {
 	if folderID == "" {
 		return errors.New("project has no Current folder")
 	}
@@ -294,6 +379,18 @@ func syncOutputs(ctx context.Context, drive *stampdrive.Client, root, folderID s
 }
 
 func replaceWorkspace(root string, contents []byte) error {
+	stagingRoot := filepath.Join(root, ".stamp", "staging")
+	if err := os.MkdirAll(stagingRoot, 0o755); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(stagingRoot, "pull-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), staging); err != nil {
+		return fmt.Errorf("validate remote project: %w", err)
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return err
@@ -306,7 +403,19 @@ func replaceWorkspace(root string, contents []byte) error {
 			return err
 		}
 	}
-	return bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), root)
+	staged, err := os.ReadDir(staging)
+	if err != nil {
+		return err
+	}
+	for _, entry := range staged {
+		if entry.Name() == ".stamp" {
+			continue
+		}
+		if err := os.Rename(filepath.Join(staging, entry.Name()), filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func same(a, b map[string]string) bool {

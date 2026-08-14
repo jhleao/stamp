@@ -1,6 +1,7 @@
 .stamp/
+outputs/
 bin/
 dist/
+node_modules/
 *.tmp
 .DS_Store
-

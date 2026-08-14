@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	htmltemplate "html/template"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -23,7 +25,11 @@ import (
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	goldhtml "github.com/yuin/goldmark/renderer/html"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 	"gopkg.in/yaml.v3"
+
+	"github.com/weve-ai/stamp/internal/theme"
 )
 
 type Result struct {
@@ -33,11 +39,21 @@ type Result struct {
 
 type pageData struct {
 	Title   string
+	Format  string
 	Meta    map[string]any
 	Content htmltemplate.HTML
 	CSS     htmltemplate.CSS
 	BaseURL htmltemplate.URL
 }
+
+type componentData struct {
+	Props   map[string]string
+	Content string
+	Meta    map[string]any
+	Format  string
+}
+
+const maxComponentDepth = 32
 
 var markdown = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
@@ -49,6 +65,9 @@ var markdown = goldmark.New(
 var pagedJS string
 
 func All(root string) ([]Result, error) {
+	if err := theme.CompileIfNeeded(context.Background(), root); err != nil {
+		return nil, err
+	}
 	var sources []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -78,8 +97,20 @@ func All(root string) ([]Result, error) {
 	}
 	results := make([]Result, 0, len(sources))
 	var problems []string
+	var printer *chromePrinter
+	defer func() {
+		if printer != nil {
+			printer.Close()
+		}
+	}()
 	for _, source := range sources {
-		output, err := One(root, source)
+		if k := kind(source); (k == "page" || k == "deck") && printer == nil {
+			printer, err = newChromePrinter()
+			if err != nil {
+				return results, err
+			}
+		}
+		output, err := renderOne(root, source, printer)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", source, err))
 			continue
@@ -92,7 +123,7 @@ func All(root string) ([]Result, error) {
 	return results, nil
 }
 
-func One(root, source string) (string, error) {
+func renderOne(root, source string, printer *chromePrinter) (string, error) {
 	k := kind(source)
 	if k == "" {
 		return "", fmt.Errorf("unsupported source %s", source)
@@ -100,8 +131,24 @@ func One(root, source string) (string, error) {
 	base := outputBase(source)
 	switch k {
 	case "page", "deck":
+		var collision bool
+		base, collision = markdownOutputBase(root, source, base, k)
+		if collision {
+			ambiguous := filepath.Join(root, outputPath(source, outputBase(source)+".pdf"))
+			if err := os.Remove(ambiguous); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return "", fmt.Errorf("remove ambiguous output: %w", err)
+			}
+		}
 		output := outputPath(source, base+".pdf")
-		return output, renderMarkdownPDF(root, source, output, k)
+		if printer == nil {
+			var err error
+			printer, err = newChromePrinter()
+			if err != nil {
+				return "", err
+			}
+			defer printer.Close()
+		}
+		return output, renderMarkdownPDF(root, source, output, k, printer)
 	case "doc":
 		output := outputPath(source, base+".pdf")
 		return output, renderDoc(root, source, output)
@@ -116,6 +163,18 @@ func One(root, source string) (string, error) {
 		return output, copyFile(filepath.Join(root, source), filepath.Join(root, output))
 	}
 	panic("unreachable")
+}
+
+func markdownOutputBase(root, source, base, format string) (string, bool) {
+	otherFormat := "page"
+	if format == "page" {
+		otherFormat = "deck"
+	}
+	sibling := filepath.Join(root, filepath.Dir(source), base+"."+otherFormat+".md")
+	if _, err := os.Stat(sibling); err == nil {
+		return base + "-" + format, true
+	}
+	return base, false
 }
 
 func outputPath(source, name string) string {
@@ -144,6 +203,10 @@ func HTMLAt(root, source, baseURL string) ([]byte, error) {
 	if err := markdown.Convert(body, &rendered); err != nil {
 		return nil, err
 	}
+	content, err := renderComponents(root, rendered.String(), meta, k)
+	if err != nil {
+		return nil, err
+	}
 	templateName := k + ".html.tmpl"
 	cssName := k + ".css"
 	templateBytes, err := os.ReadFile(filepath.Join(root, "theme", templateName))
@@ -159,7 +222,7 @@ func HTMLAt(root, source, baseURL string) ([]byte, error) {
 		return nil, err
 	}
 	title, _ := meta["title"].(string)
-	view := pageData{Title: title, Meta: meta, Content: htmltemplate.HTML(rendered.String()), CSS: htmltemplate.CSS(css), BaseURL: htmltemplate.URL(baseURL)}
+	view := pageData{Title: title, Format: k, Meta: meta, Content: htmltemplate.HTML(content), CSS: htmltemplate.CSS(css), BaseURL: htmltemplate.URL(baseURL)}
 	var output bytes.Buffer
 	if err := tmpl.Execute(&output, view); err != nil {
 		return nil, err
@@ -168,13 +231,302 @@ func HTMLAt(root, source, baseURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lower := strings.ToLower(string(result))
-	for _, unsafe := range []string{"<script", "<iframe", "<object", "<embed"} {
-		if strings.Contains(lower, unsafe) {
-			return nil, fmt.Errorf("template output contains unsafe %s markup", unsafe)
+	return result, validateOutput(result, baseURL)
+}
+
+// ComponentHTMLAt renders one theme component with representative content.
+// It deliberately bypasses the page/deck shell so Studio can inspect the
+// component itself without the visual noise of a complete example document.
+func ComponentHTMLAt(root, name, baseURL string) ([]byte, error) {
+	return ComponentHTMLAtWith(root, name, baseURL, nil)
+}
+
+// ComponentHTMLAtWith renders a component preview with optional prop overrides
+// supplied by Studio's small preview control strip.
+func ComponentHTMLAtWith(root, name, baseURL string, overrides map[string]string) ([]byte, error) {
+	if !validComponentName(name) {
+		return nil, fmt.Errorf("invalid component name %q", name)
+	}
+	templatePath := componentPath(root, name)
+	templateBytes, err := os.ReadFile(templatePath)
+	if err != nil {
+		return nil, err
+	}
+	props := componentPreviewProps(templateBytes)
+	for key, value := range overrides {
+		if componentPropName.MatchString(key) {
+			props[key] = value
 		}
 	}
-	return result, nil
+	var attributes strings.Builder
+	for _, key := range sortedKeys(props) {
+		attributes.WriteByte(' ')
+		attributes.WriteString(key)
+		attributes.WriteString(`="`)
+		attributes.WriteString(htmltemplate.HTMLEscapeString(props[key]))
+		attributes.WriteByte('"')
+	}
+	content := componentPreviewContent(name)
+	source := "<" + name + attributes.String() + ">" + content + "</" + name + ">"
+	meta := map[string]any{
+		"title": "Component preview", "subtitle": "Shown in isolation", "category": "Example",
+		"author": "Stamp", "date": "Today", "audience": "Your team", "filed": "Preview",
+	}
+	rendered, err := renderComponents(root, source, meta, "component")
+	if err != nil {
+		return nil, err
+	}
+	css, err := os.ReadFile(filepath.Join(root, "theme", "page.css"))
+	if err != nil {
+		return nil, err
+	}
+	result := []byte(`<!doctype html><html><head><meta charset="utf-8"><base href="` + htmltemplate.HTMLEscapeString(baseURL) +
+		`"><meta name="viewport" content="width=device-width,initial-scale=1"><style>` + string(css) +
+		`</style><style>html,body{min-height:100%;margin:0}.stamp-component-preview{box-sizing:border-box;min-height:100vh;padding:0;display:flex;flex-direction:column;justify-content:center}.stamp-component-preview>*{width:100%;margin:0}</style></head><body><main class="stamp-component-preview">` + rendered + `</main></body></html>`)
+	return result, validateOutput(result, baseURL)
+}
+
+func componentPath(root, name string) string {
+	return filepath.Join(root, "theme", "components", name+".tsx")
+}
+
+var remoteCSS = regexp.MustCompile(`(?i)(@import\s|url\(\s*['"]?\s*(?:https?:|file:|//))`)
+
+func validateOutput(data []byte, baseURL string) error {
+	document, err := html.Parse(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("validate rendered HTML: %w", err)
+	}
+	var visit func(*html.Node) error
+	visit = func(node *html.Node) error {
+		if node.Type == html.ElementNode {
+			tag := strings.ToLower(node.Data)
+			switch tag {
+			case "script", "iframe", "object", "embed", "link":
+				return fmt.Errorf("template output contains unsafe <%s> markup", tag)
+			case "style":
+				if node.FirstChild != nil && remoteCSS.MatchString(node.FirstChild.Data) {
+					return errors.New("template CSS may not load remote or absolute resources")
+				}
+			case "meta":
+				for _, attr := range node.Attr {
+					if strings.EqualFold(attr.Key, "http-equiv") && strings.EqualFold(attr.Val, "refresh") {
+						return errors.New("template output may not redirect")
+					}
+				}
+			case "base":
+				for _, attr := range node.Attr {
+					if strings.EqualFold(attr.Key, "href") && attr.Val != baseURL {
+						return errors.New("template may not change the project base URL")
+					}
+				}
+			}
+			for _, attr := range node.Attr {
+				key, value := strings.ToLower(attr.Key), strings.TrimSpace(attr.Val)
+				if strings.HasPrefix(key, "on") {
+					return fmt.Errorf("template output may not use event attribute %s", attr.Key)
+				}
+				if key == "style" && remoteCSS.MatchString(value) {
+					return errors.New("template styles may not load remote or absolute resources")
+				}
+				if key == "src" || key == "poster" {
+					lower := strings.ToLower(value)
+					if strings.HasPrefix(value, "/") || (strings.Contains(lower, ":") && !strings.HasPrefix(lower, "data:")) {
+						return fmt.Errorf("template resource %s must be local to the project or an embedded data URL", value)
+					}
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return visit(document)
+}
+
+var componentPropPattern = regexp.MustCompile(`\bprops\.([A-Za-z][A-Za-z0-9_-]*)`)
+var componentPropName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
+func componentPreviewProps(template []byte) map[string]string {
+	values := map[string]string{}
+	for _, match := range componentPropPattern.FindAllSubmatch(template, -1) {
+		key := string(match[1])
+		switch strings.ToLower(key) {
+		case "value", "metric", "score", "rating":
+			values[key] = "94%"
+		case "title", "heading":
+			values[key] = "A clear component title"
+		case "lead":
+			values[key] = "The outcome is speed without surrendering auditability."
+		case "label", "kicker", "eyebrow", "category":
+			values[key] = "Example"
+		case "index", "number", "no":
+			values[key] = "01"
+		case "cols":
+			values[key] = "3"
+		case "full", "compact", "inverse", "featured":
+			values[key] = ""
+		case "ratio", "divider":
+			values[key] = ""
+		case "cite", "source":
+			values[key] = "Source note"
+		case "image", "src", "url":
+			values[key] = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDcwMCI+PHJlY3QgZmlsbD0iI2U3ZTVlNCIgd2lkdGg9IjEyMDAiIGhlaWdodD0iNzAwIi8+PHBhdGggZD0iTTAgNTYwIDM4MCAyNTBsMjIwIDIwMCAxNjAtMTIwIDQ0MCAyOTB2MTMwSDB6IiBmaWxsPSIjY2JjN2MzIi8+PC9zdmc+"
+		default:
+			values[key] = "Supporting detail"
+		}
+	}
+	return values
+}
+
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func componentPreviewContent(name string) string {
+	switch name {
+	case "columns":
+		return `<div><strong>First idea</strong><p>A concise supporting thought.</p></div><div><strong>Second idea</strong><p>Another useful point.</p></div><div><strong>Third idea</strong><p>A final useful point.</p></div>`
+	case "band":
+		return `<h2>Proof where it counts</h2>`
+	case "figures":
+		return `<div><strong>62%</strong><p>First signal</p></div><div><strong>38%</strong><p>Second signal</p></div>`
+	case "cover", "section-cover":
+		return `<h1>Make the important thing clear.</h1><p>A short, useful line of context.</p>`
+	case "customers":
+		return `<span>Northstar</span><span>Fieldwork</span><span>Daylight</span>`
+	default:
+		return `<h3>Component preview</h3><p>Representative content shows spacing, type, color, and behavior.</p>`
+	}
+}
+
+// renderComponents expands custom tags backed by theme/components/<tag>.tsx.
+// Unknown tags remain ordinary HTML, so a theme can still use lightweight CSS-only
+// primitives. Components receive props, children, document meta, and format
+// ("page", "deck", or "component" for an isolated preview).
+func renderComponents(root, source string, meta map[string]any, format string) (string, error) {
+	program, err := loadComponentProgram(root)
+	if err != nil {
+		return "", err
+	}
+	if len(program.components) == 0 {
+		return source, nil
+	}
+	renderer, err := program.newRenderer()
+	if err != nil {
+		return "", err
+	}
+	source = program.closeSelfClosingTags(source)
+	context := &html.Node{Type: html.ElementNode, DataAtom: atom.Main, Data: "main"}
+	nodes, err := html.ParseFragment(strings.NewReader(source), context)
+	if err != nil {
+		return "", fmt.Errorf("parse rendered Markdown: %w", err)
+	}
+	var output strings.Builder
+	for _, node := range nodes {
+		expanded, expandErr := expandComponentNode(node, renderer, meta, format, 0)
+		if expandErr != nil {
+			return "", expandErr
+		}
+		output.WriteString(expanded)
+	}
+	return output.String(), nil
+}
+
+func expandComponentNode(node *html.Node, renderer *componentRenderer, meta map[string]any, format string, depth int) (string, error) {
+	if depth > maxComponentDepth {
+		return "", fmt.Errorf("components exceed maximum nesting depth of %d", maxComponentDepth)
+	}
+	if node.Type == html.ElementNode {
+		if renderer.has(node.Data) {
+			props := map[string]string{}
+			for _, attr := range node.Attr {
+				if strings.HasPrefix(strings.ToLower(attr.Key), "on") {
+					return "", fmt.Errorf("component <%s> may not use event attribute %s", node.Data, attr.Key)
+				}
+				props[attr.Key] = attr.Val
+			}
+			var content strings.Builder
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				expanded, err := expandComponentNode(child, renderer, meta, format, depth+1)
+				if err != nil {
+					return "", err
+				}
+				content.WriteString(expanded)
+			}
+			view := componentData{Props: props, Content: content.String(), Meta: meta, Format: format}
+			rendered, err := renderer.renderComponent(node.Data, view)
+			if err != nil {
+				return "", fmt.Errorf("component <%s>: %w", node.Data, err)
+			}
+			return expandComponentHTML(rendered, renderer, meta, format, depth+1)
+		}
+	}
+	clone := *node
+	clone.FirstChild, clone.LastChild = nil, nil
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		expanded, err := expandComponentNode(child, renderer, meta, format, depth)
+		if err != nil {
+			return "", err
+		}
+		fragments, err := html.ParseFragment(strings.NewReader(expanded), &clone)
+		if err != nil {
+			return "", err
+		}
+		for _, fragment := range fragments {
+			clone.AppendChild(fragment)
+		}
+	}
+	var output bytes.Buffer
+	if err := html.Render(&output, &clone); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+func expandComponentHTML(source string, renderer *componentRenderer, meta map[string]any, format string, depth int) (string, error) {
+	source = renderer.program.closeSelfClosingTags(source)
+	context := &html.Node{Type: html.ElementNode, DataAtom: atom.Main, Data: "main"}
+	nodes, err := html.ParseFragment(strings.NewReader(source), context)
+	if err != nil {
+		return "", err
+	}
+	var output strings.Builder
+	for _, node := range nodes {
+		expanded, err := expandComponentNode(node, renderer, meta, format, depth)
+		if err != nil {
+			return "", err
+		}
+		output.WriteString(expanded)
+	}
+	return output.String(), nil
+}
+
+func (program *componentProgram) closeSelfClosingTags(source string) string {
+	for _, component := range program.components {
+		source = component.selfClosing.ReplaceAllString(source, component.explicitClosing)
+	}
+	return source
+}
+
+func validComponentName(name string) bool {
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, char := range name {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func inlineThemeFonts(root string, html []byte) ([]byte, error) {
@@ -193,9 +545,21 @@ func inlineThemeFonts(root string, html []byte) ([]byte, error) {
 	return html, nil
 }
 
-// BrowserPreview renders office formats to a cached PDF for Studio.
+// BrowserPreview renders a source to the PDF Studio displays. Markdown sources
+// deliberately use the same renderer and output path as export: keeping a
+// separate HTML preview here makes pagination, fonts, and page geometry drift.
 func BrowserPreview(root, source string) (string, error) {
 	k := kind(source)
+	if k == "page" || k == "deck" {
+		if err := theme.CompileIfNeeded(context.Background(), root); err != nil {
+			return "", err
+		}
+		output, err := renderOne(root, source, nil)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, output), nil
+	}
 	previewDir := filepath.Join(root, ".stamp", "preview", "office")
 	if err := os.MkdirAll(previewDir, 0o755); err != nil {
 		return "", err
@@ -211,7 +575,7 @@ func BrowserPreview(root, source string) (string, error) {
 	}
 }
 
-func renderMarkdownPDF(root, source, output, kind string) error {
+func renderMarkdownPDF(root, source, output, kind string, printer *chromePrinter) error {
 	html, err := HTML(root, source)
 	if err != nil {
 		return err
@@ -234,21 +598,44 @@ func renderMarkdownPDF(root, source, output, kind string) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return err
 	}
+	return printer.Print(htmlPath, outputPath, kind)
+}
+
+type chromePrinter struct {
+	browser        context.Context
+	closeBrowser   context.CancelFunc
+	closeAllocator context.CancelFunc
+}
+
+func newChromePrinter() (*chromePrinter, error) {
 	chrome, err := findChrome()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(chrome),
 		chromedp.Flag("allow-file-access-from-files", true),
 	)
-	allocator, stopChrome := chromedp.NewExecAllocator(ctx, opts...)
-	defer stopChrome()
+	allocator, closeAllocator := chromedp.NewExecAllocator(context.Background(), opts...)
 	browser, closeBrowser := chromedp.NewContext(allocator)
-	defer closeBrowser()
+	if err := chromedp.Run(browser); err != nil {
+		closeBrowser()
+		closeAllocator()
+		return nil, fmt.Errorf("start Chromium: %w", err)
+	}
+	return &chromePrinter{browser: browser, closeBrowser: closeBrowser, closeAllocator: closeAllocator}, nil
+}
 
+func (printer *chromePrinter) Close() {
+	printer.closeBrowser()
+	printer.closeAllocator()
+}
+
+func (printer *chromePrinter) Print(htmlPath, outputPath, kind string) error {
+	tab, closeTab := chromedp.NewContext(printer.browser)
+	defer closeTab()
+	ctx, cancel := context.WithTimeout(tab, 60*time.Second)
+	defer cancel()
 	var pdf []byte
 	var paginationError string
 	actions := []chromedp.Action{
@@ -276,7 +663,7 @@ func renderMarkdownPDF(root, source, output, kind string) error {
 			return err
 		}),
 	)
-	err = chromedp.Run(browser, actions...)
+	err := chromedp.Run(ctx, actions...)
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("Chromium timed out")
 	}
