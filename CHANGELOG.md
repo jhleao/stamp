@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/jhleao/stamp/compare/v1.0.0...v1.0.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* correct repository identity ([a85ec9c](https://github.com/jhleao/stamp/commit/a85ec9c1cc65050f60c0a2707f2cdcd726cb453f))
+
 # 1.0.0 (2026-08-14)
 
 
