@@ -9,7 +9,6 @@
     "build:studio": "vite build --config studio/vite.config.ts",
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run --no-ci",
-    "theme:stress": "tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/page.css --minify && tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/deck.css --minify",
     "test:studio": "vitest run --config studio/vite.config.ts"
   },
   "repository": {

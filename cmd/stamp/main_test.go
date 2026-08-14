@@ -13,7 +13,9 @@ func TestSkillPrintsCanonicalProjectGuide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "# Working with this Stamp project") || strings.Contains(output, "MCP") {
+	if !strings.Contains(output, "# Working with this Stamp project") ||
+		!strings.Contains(output, "inspect theme/README.md, theme/components/") ||
+		!strings.Contains(output, "Reuse existing components") || strings.Contains(output, "MCP") {
 		t.Fatalf("unexpected skill output: %q", output)
 	}
 }
@@ -23,7 +25,7 @@ func TestTutorialStartsAtZeroAndEndsWithCollaboration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Stamp quickstart", "stamp doctor", "stamp login", "stamp new", "stamp studio", "stamp pull", "stamp push", "Add a colleague", "stamp clone"} {
+	for _, want := range []string{"# Stamp quickstart", "stamp doctor", "stamp login", "stamp new", "stamp studio", "robot button", "top right", "stamp skill", "stamp pull", "stamp push", "Add a colleague", "stamp clone"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("tutorial missing %q: %s", want, output)
 		}

@@ -111,6 +111,7 @@ button:disabled { cursor: default; opacity: .3; }
 .area-tab.is-active { color: var(--ink); box-shadow: inset 0 -1px var(--accent); }
 .file-group {
   @apply mt-3 flex items-baseline justify-between px-3 pb-1 text-[0.66rem] font-medium text-faint;
+  position: relative;
   font-family: "Geist Mono", monospace; letter-spacing: .04em; text-transform: uppercase;
 }
 .file-group small { @apply text-[0.6rem] font-normal opacity-70; }
@@ -128,6 +129,23 @@ button:disabled { cursor: default; opacity: .3; }
 .file-type-marker { color: var(--faint); }
 .file-row small { @apply text-[0.58rem] tracking-wide text-faint; }
 .file-row.is-active { @apply bg-selected text-ink; }
+.file-row.is-selected { background: var(--selected); color: var(--ink); }
+.file-row.is-active { box-shadow: inset 2px 0 var(--accent); }
+.file-rename { padding: 3px 10px 3px calc(10px + var(--tree-depth, 0) * 12px); }
+.file-rename input {
+  display: block; width: 100%; min-width: 0; border: 1px solid var(--ink); border-radius: 0; padding: 2px 4px;
+  outline: 0; background: var(--source); color: var(--ink); font-family: inherit; font-size: .75rem;
+}
+.file-context-menu {
+  position: fixed; z-index: 40; display: grid; width: 152px; border: 1px solid var(--divider); padding: 3px;
+  background: var(--source); box-shadow: 0 10px 30px color-mix(in oklch, black 24%, transparent);
+  animation: context-menu-enter 70ms ease-out both;
+}
+.file-context-menu button { padding: 5px 8px; background: transparent; color: var(--muted); text-align: left; font-size: .71rem; }
+.file-context-menu button:hover, .file-context-menu button:focus-visible { outline: 0; background: var(--hover); color: var(--ink); }
+.file-context-menu > span { height: 1px; margin: 3px -3px; background: var(--divider); }
+.file-context-menu button.is-danger { color: var(--danger); }
+@keyframes context-menu-enter { from { opacity: 0; transform: translateY(-2px); } }
 .tree-folder { margin: 0; }
 .tree-folder summary {
   display: block; position: relative; overflow: hidden; padding: 5px 12px 5px calc(12px + var(--tree-depth, 0) * 12px);
@@ -138,6 +156,19 @@ button:disabled { cursor: default; opacity: .3; }
 .tree-folder summary::before { content: "›"; display: inline-block; width: 12px; color: var(--faint); transform-origin: 42% 52%; }
 .tree-folder[open] > summary::before { transform: rotate(90deg); }
 .tree-folder summary:hover { background: var(--hover); color: var(--ink); }
+.tree-folder summary.is-drop-target::after, .file-group.is-drop-target::after {
+  content: ""; position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.folder-rename {
+  display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: center;
+  padding: 2px 10px 2px calc(12px + var(--tree-depth, 0) * 12px);
+}
+.folder-rename > span { color: var(--faint); font-size: .73rem; }
+.folder-rename input {
+  width: 100%; min-width: 0; border: 1px solid var(--ink); border-radius: 0; padding: 2px 4px;
+  outline: 0; background: var(--source); color: var(--ink); font-family: inherit; font-size: .73rem; font-weight: 500;
+}
 
 .workbench {
   min-width: 0;
@@ -209,10 +240,18 @@ button:disabled { cursor: default; opacity: .3; }
 .splitter { position: relative; z-index: 2; background: var(--divider); cursor: col-resize; touch-action: none; }
 .splitter::after { content: ""; position: absolute; inset: 0 -3px; }
 .splitter:hover, .splitter:focus-visible { background: var(--faint); }
+.pdf-preview-container { position: absolute; inset: 32px 0 0; min-height: 0; }
 .pdf-preview {
-  position: absolute; inset: 32px 0 0; overflow: auto; padding: 16px;
+  position: absolute; inset: 0; overflow: auto; padding: 16px;
   background: var(--preview); scrollbar-gutter: stable;
 }
+.pdf-download {
+  position: absolute; bottom: 16px; left: 16px; z-index: 4; display: grid; width: 30px; height: 30px;
+  place-items: center; border: 1px solid var(--divider); background: var(--rail); color: var(--muted);
+}
+.pdf-download:hover { border-color: var(--faint); background: var(--hover); color: var(--ink); }
+.pdf-download:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+.pdf-download svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-linejoin: miter; stroke-width: 1.35; }
 .pdf-zoom {
   position: sticky; top: -16px; z-index: 3; display: flex; width: fit-content; margin: 0 0 8px auto;
   border: 1px solid var(--divider); background: var(--rail);
@@ -257,6 +296,7 @@ button:disabled { cursor: default; opacity: .3; }
 .stamp-dialog h2 { margin: 0; font-size: 1.02rem; font-weight: 600; letter-spacing: -.015em; }
 .stamp-dialog p { margin: 7px 0 20px; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .dialog-kicker { display: block; margin-bottom: 7px; color: var(--accent); font-family: "Geist Mono", monospace; font-size: .62rem; font-weight: 500; text-transform: uppercase; }
+.dialog-kicker.is-danger { color: var(--danger); }
 .sync-facts { border-block: 1px solid var(--divider); }
 .sync-fact { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; padding: 7px 0; border-top: 1px solid var(--divider); font-size: .7rem; }
 .sync-fact:first-child { border-top: 0; }
@@ -289,6 +329,10 @@ button:disabled { cursor: default; opacity: .3; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 1px; margin: 22px -8px -8px 0; }
 .dialog-actions button { @apply px-2.5 py-1.75 text-[0.74rem] text-muted hover:bg-hover hover:text-ink; }
 .dialog-actions .primary { border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+.dialog-actions .danger { border: 1px solid var(--danger); background: transparent; color: var(--danger); }
+.dialog-actions .danger:hover { background: var(--danger); color: white; }
+.file-delete-dialog { width: min(440px, calc(100vw - 32px)); }
+.delete-file-path { overflow: hidden; border-block: 1px solid var(--divider); padding: 9px 0; color: var(--muted); font-family: "Geist Mono", monospace; font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }
 .dialog-confirm { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; color: var(--muted); font-size: .7rem; line-height: 1.4; }
 .dialog-confirm input { width: 13px; height: 13px; margin: 1px 0 0; flex: none; accent-color: var(--accent); }
 .notice {

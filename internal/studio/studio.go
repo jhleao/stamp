@@ -30,7 +30,7 @@ import (
 	"github.com/jhleao/stamp/internal/theme"
 )
 
-//go:embed static/*
+//go:embed all:static
 var static embed.FS
 
 const studioAddress = "127.0.0.1:57183"
@@ -71,6 +71,16 @@ type pullRequest struct {
 
 type componentRequest struct {
 	Name string `json:"name"`
+}
+
+type fileOperationRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name,omitempty"`
+}
+
+type moveFilesRequest struct {
+	Paths       []string `json:"paths"`
+	Destination string   `json:"destination"`
 }
 
 var componentName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -148,6 +158,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET "+base+"/api/sync-details", s.syncDetails)
 	mux.HandleFunc("GET "+base+"/api/file", s.readFile)
 	mux.HandleFunc("PUT "+base+"/api/file", s.writeFile)
+	mux.HandleFunc("PATCH "+base+"/api/file", s.renameFile)
+	mux.HandleFunc("DELETE "+base+"/api/file", s.deleteFile)
+	mux.HandleFunc("POST "+base+"/api/file/duplicate", s.duplicateFile)
+	mux.HandleFunc("POST "+base+"/api/files/move", s.moveFiles)
+	mux.HandleFunc("PATCH "+base+"/api/folder", s.renameFolder)
+	mux.HandleFunc("DELETE "+base+"/api/folder", s.deleteFolder)
 	mux.HandleFunc("GET "+base+"/api/preview", s.preview)
 	mux.HandleFunc("GET "+base+"/api/component-preview", s.componentPreview)
 	mux.HandleFunc("POST "+base+"/api/pull", s.pull)
@@ -439,6 +455,311 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, map[string]any{"ok": true, "warning": warning})
 }
 
+func (s *Server) renameFile(w http.ResponseWriter, r *http.Request) {
+	var request fileOperationRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	path, rel, err := s.managedFile(request.Path)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(request.Name)
+	if !validFileName(name) {
+		s.writeError(w, errors.New("enter a file name without a folder path"), http.StatusBadRequest)
+		return
+	}
+	destinationRel := filepath.ToSlash(filepath.Join(filepath.Dir(rel), name))
+	if destinationRel == rel {
+		s.writeJSON(w, map[string]any{"ok": true, "path": rel, "message": "Name unchanged"})
+		return
+	}
+	destination, err := s.resolve(destinationRel)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(destination); err == nil {
+		s.writeError(w, errors.New("a file with that name already exists"), http.StatusConflict)
+		return
+	} else if !errors.Is(err, os.ErrNotExist) {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if err := os.Rename(path, destination); err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.broadcast("change")
+	s.writeJSON(w, map[string]any{"ok": true, "path": destinationRel, "message": "Renamed to " + name})
+}
+
+func (s *Server) duplicateFile(w http.ResponseWriter, r *http.Request) {
+	var request fileOperationRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	path, rel, err := s.managedFile(request.Path)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	destinationRel, destination := s.duplicateDestination(rel)
+	if err := os.WriteFile(destination, data, 0o644); err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.broadcast("change")
+	s.writeJSON(w, map[string]any{"ok": true, "path": destinationRel, "message": "Duplicated as " + filepath.Base(destinationRel)})
+}
+
+func (s *Server) deleteFile(w http.ResponseWriter, r *http.Request) {
+	path, rel, err := s.managedFile(r.URL.Query().Get("path"))
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.broadcast("change")
+	s.writeJSON(w, map[string]any{"ok": true, "message": "Deleted " + filepath.Base(rel)})
+}
+
+func (s *Server) moveFiles(w http.ResponseWriter, r *http.Request) {
+	var request moveFilesRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&request); err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if len(request.Paths) == 0 || len(request.Paths) > 200 {
+		s.writeError(w, errors.New("select between 1 and 200 files to move"), http.StatusBadRequest)
+		return
+	}
+	_, destinationRel, err := s.managedFolder(request.Destination)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	type move struct{ source, sourceRel, destination, destinationRel string }
+	moves := make([]move, 0, len(request.Paths))
+	seenSources := make(map[string]bool, len(request.Paths))
+	seenDestinations := make(map[string]bool, len(request.Paths))
+	for _, value := range request.Paths {
+		source, sourceRel, err := s.managedFile(value)
+		if err != nil {
+			s.writeError(w, err, http.StatusBadRequest)
+			return
+		}
+		if seenSources[sourceRel] {
+			continue
+		}
+		seenSources[sourceRel] = true
+		targetRel := filepath.ToSlash(filepath.Join(destinationRel, filepath.Base(sourceRel)))
+		if targetRel == sourceRel {
+			continue
+		}
+		if seenDestinations[targetRel] {
+			s.writeError(w, fmt.Errorf("more than one selected file would become %s", filepath.Base(targetRel)), http.StatusConflict)
+			return
+		}
+		seenDestinations[targetRel] = true
+		target, err := s.resolve(targetRel)
+		if err != nil {
+			s.writeError(w, err, http.StatusBadRequest)
+			return
+		}
+		if _, err := os.Stat(target); err == nil {
+			s.writeError(w, fmt.Errorf("%s already exists in that folder", filepath.Base(targetRel)), http.StatusConflict)
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			s.writeError(w, err, http.StatusInternalServerError)
+			return
+		}
+		moves = append(moves, move{source: source, sourceRel: sourceRel, destination: target, destinationRel: targetRel})
+	}
+	completed := 0
+	for index, item := range moves {
+		if err := os.Rename(item.source, item.destination); err != nil {
+			for rollback := completed - 1; rollback >= 0; rollback-- {
+				_ = os.Rename(moves[rollback].destination, moves[rollback].source)
+			}
+			s.writeError(w, fmt.Errorf("move %s: %w", filepath.Base(item.sourceRel), err), http.StatusInternalServerError)
+			return
+		}
+		completed = index + 1
+	}
+	result := make(map[string]string, len(moves))
+	for _, item := range moves {
+		result[item.sourceRel] = item.destinationRel
+	}
+	s.broadcast("change")
+	label := fmt.Sprintf("Moved %d files", len(moves))
+	if len(moves) == 1 {
+		label = "Moved " + filepath.Base(moves[0].sourceRel)
+	} else if len(moves) == 0 {
+		label = "Files are already in that folder"
+	}
+	s.writeJSON(w, map[string]any{"ok": true, "moves": result, "message": label})
+}
+
+func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request) {
+	var request fileOperationRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&request); err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	path, rel, err := s.managedFolder(request.Path)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(request.Name)
+	if !validFileName(name) {
+		s.writeError(w, errors.New("enter a folder name without a parent path"), http.StatusBadRequest)
+		return
+	}
+	destinationRel := filepath.ToSlash(filepath.Join(filepath.Dir(rel), name))
+	if destinationRel == rel {
+		s.writeJSON(w, map[string]any{"ok": true, "path": rel, "message": "Name unchanged"})
+		return
+	}
+	destination, err := s.resolve(destinationRel)
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(destination); err == nil {
+		s.writeError(w, errors.New("a folder with that name already exists"), http.StatusConflict)
+		return
+	} else if !errors.Is(err, os.ErrNotExist) {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if err := os.Rename(path, destination); err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.broadcast("change")
+	s.writeJSON(w, map[string]any{"ok": true, "path": destinationRel, "message": "Renamed folder to " + name})
+}
+
+func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request) {
+	path, rel, err := s.managedFolder(r.URL.Query().Get("path"))
+	if err != nil {
+		s.writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := os.RemoveAll(path); err != nil {
+		s.writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	s.broadcast("change")
+	s.writeJSON(w, map[string]any{"ok": true, "message": "Deleted folder " + filepath.Base(rel)})
+}
+
+func (s *Server) managedFile(value string) (string, string, error) {
+	rel := filepath.ToSlash(filepath.Clean(value))
+	files, err := s.files()
+	if err != nil {
+		return "", "", err
+	}
+	found := false
+	for _, file := range files {
+		if file.Path == rel && fileOperationAllowed(file) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", "", errors.New("that file is not managed by Studio")
+	}
+	path, err := s.resolve(rel)
+	return path, rel, err
+}
+
+func (s *Server) managedFolder(value string) (string, string, error) {
+	rel := filepath.ToSlash(filepath.Clean(value))
+	if rel == "." || rel == "" {
+		return "", "", errors.New("that folder is not managed by Studio")
+	}
+	files, err := s.files()
+	if err != nil {
+		return "", "", err
+	}
+	prefix := strings.TrimSuffix(rel, "/") + "/"
+	found := false
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, prefix) && fileOperationAllowed(file) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", "", errors.New("that folder is not managed by Studio")
+	}
+	path, err := s.resolve(rel)
+	if err != nil {
+		return "", "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return "", "", errors.New("that folder is unavailable")
+	}
+	return path, rel, nil
+}
+
+func fileOperationAllowed(file fileItem) bool {
+	if file.Hidden || strings.HasPrefix(file.Path, "outputs/") {
+		return false
+	}
+	switch file.Path {
+	case "stamp.yaml", "AGENTS.md", "CLAUDE.md":
+		return false
+	default:
+		return true
+	}
+}
+
+func validFileName(name string) bool {
+	return name != "" && name != "." && name != ".." && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\\x00")
+}
+
+func (s *Server) duplicateDestination(rel string) (string, string) {
+	dir, name := filepath.Dir(rel), filepath.Base(rel)
+	stem, suffix := splitFileName(name)
+	for index := 1; ; index++ {
+		copySuffix := "-copy"
+		if index > 1 {
+			copySuffix = fmt.Sprintf("-copy-%d", index)
+		}
+		candidateRel := filepath.ToSlash(filepath.Join(dir, stem+copySuffix+suffix))
+		candidate, _ := s.resolve(candidateRel)
+		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
+			return candidateRel, candidate
+		}
+	}
+}
+
+func splitFileName(name string) (string, string) {
+	for _, suffix := range []string{".page.md", ".deck.md", ".doc.md", ".html.tmpl"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix), suffix
+		}
+	}
+	ext := filepath.Ext(name)
+	return strings.TrimSuffix(name, ext), ext
+}
+
 func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	path, err := s.resolve(rel)
@@ -564,7 +885,12 @@ func (s *Server) createComponent(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	starter := `export default function Component({ props, children }) {
+	starter := `export const metadata = {
+  description: "Describe what this component communicates.",
+  usage: "Explain when to use it and any important constraints."
+};
+
+export default function Component({ props, children }) {
   return (
     <section className="` + request.Name + ` my-6 border-y border-stone-300 py-4 text-sm leading-relaxed">
       {props.label && <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">{props.label}</p>}

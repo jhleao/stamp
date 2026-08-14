@@ -68,7 +68,8 @@ function relativeParts(file: FileItem) {
 }
 
 export function fileTree(files: FileItem[], group: string): FileTree {
-  const root: FileTree = { name: group, path: "", folders: [], files: [] };
+  const rootPath = (groupRoots[group] || "").replace(/\/$/, "");
+  const root: FileTree = { name: group, path: rootPath, folders: [], files: [] };
   for (const file of files.filter((candidate) => candidate.group === group)) {
     const parts = relativeParts(file);
     let node = root;
@@ -97,4 +98,12 @@ export function groupedFiles(files: FileItem[], activeSection: FileSection) {
   return groupOrder[activeSection]
     .filter((group) => visible.some((file) => file.group === group))
     .map((group) => fileTree(visible, group));
+}
+
+function filesInTreeOrder(tree: FileTree): FileItem[] {
+  return [...tree.folders.flatMap(filesInTreeOrder), ...tree.files];
+}
+
+export function fileSelectionOrder(files: FileItem[], activeSection: FileSection) {
+  return groupedFiles(files, activeSection).flatMap(filesInTreeOrder);
 }

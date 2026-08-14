@@ -6,7 +6,7 @@ import {
 } from "./state";
 import type { FileChange, FileItem, FileSection } from "./types";
 import { MonacoEditor, type MonacoEditorHandle } from "./MonacoEditor";
-import { fileLabelParts, groupedFiles, visibleFiles, type FileTree } from "./navigation";
+import { fileLabelParts, fileSelectionOrder, groupedFiles, visibleFiles, type FileTree } from "./navigation";
 import { previewURL, usesPdfCanvas } from "./preview";
 import { PdfPreview } from "./PdfPreview";
 import { ComponentPreview } from "./ComponentPreview";
@@ -112,13 +112,42 @@ async function copyAgentInstructions() {
   }
 }
 
-function FileButton({ file, depth, onSelect }: { file: FileItem; depth: number; onSelect: (file: FileItem) => void }) {
+function FileButton({ file, depth, onSelect, onContextMenu, renaming, onRename, onCancelRename, selected, primary, onDragStart, onDragEnd }: {
+  file: FileItem;
+  depth: number;
+  onSelect: (event: MouseEvent, file: FileItem) => void;
+  onContextMenu: (event: MouseEvent, file: FileItem) => void;
+  renaming: boolean;
+  onRename: (file: FileItem, name: string) => void;
+  onCancelRename: () => void;
+  selected: boolean;
+  primary: boolean;
+  onDragStart: (event: DragEvent, file: FileItem) => void;
+  onDragEnd: () => void;
+}) {
   const label = fileLabelParts(file.label);
+  if (renaming) {
+    return <form class="file-rename" style={{ "--tree-depth": depth }} onSubmit={(event) => {
+      event.preventDefault();
+      onRename(file, new FormData(event.currentTarget).get("name")?.toString() || "");
+    }}>
+      <input name="name" defaultValue={file.label} aria-label={`Rename ${file.label}`} ref={(input) => {
+        if (!input) return;
+        requestAnimationFrame(() => { input.focus(); input.setSelectionRange(0, label.prefix.length); });
+      }} onBlur={onCancelRename} onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); onCancelRename(); }
+      }} />
+    </form>;
+  }
   return <button
-    class={`file-row ${selectedPath.value === file.path ? "is-active" : ""}`}
+    class={`file-row ${selected ? "is-selected" : ""} ${primary ? "is-active" : ""}`}
     style={{ "--tree-depth": depth }}
     title={file.path}
-    onClick={() => onSelect(file)}
+    draggable
+    onClick={(event) => onSelect(event, file)}
+    onContextMenu={(event) => onContextMenu(event, file)}
+    onDragStart={(event) => onDragStart(event, file)}
+    onDragEnd={onDragEnd}
   >
     <span>{label.prefix}{label.marker && <span class="file-type-marker">{label.marker}</span>}{label.suffix}</span>
     {file.path.endsWith(".css") && <small>CSS</small>}
@@ -126,12 +155,48 @@ function FileButton({ file, depth, onSelect }: { file: FileItem; depth: number; 
   </button>;
 }
 
-function Folder({ tree, depth, onSelect }: { tree: FileTree; depth: number; onSelect: (file: FileItem) => void }) {
+type FileTreeActions = {
+  onContextMenu: (event: MouseEvent, file: FileItem) => void;
+  renamingPath: string | null;
+  onRename: (file: FileItem, name: string) => void;
+  onCancelRename: () => void;
+  renamingFolderPath: string | null;
+  onFolderContextMenu: (event: MouseEvent, folder: FileTree) => void;
+  onRenameFolder: (folder: FileTree, name: string) => void;
+  onCancelFolderRename: () => void;
+  selectedPaths: string[];
+  dropTargetPath: string | null;
+  canDrop: (path: string, group: string) => boolean;
+  onDragStart: (event: DragEvent, file: FileItem) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent, path: string, group: string) => void;
+  onDragLeave: (event: DragEvent, path: string) => void;
+  onDrop: (event: DragEvent, path: string, group: string) => void;
+};
+
+function Folder({ tree, group, depth, onSelect, actions }: { tree: FileTree; group: string; depth: number; onSelect: (event: MouseEvent, file: FileItem) => void; actions: FileTreeActions }) {
   const containsSelection = Boolean(selectedPath.value && [...tree.files, ...tree.folders.flatMap(allFiles)].some((file) => file.path === selectedPath.value));
   return <details class="tree-folder" open={containsSelection || undefined}>
-    <summary style={{ "--tree-depth": depth }} title={tree.path}>{tree.name}</summary>
-    {tree.folders.map((folder) => <Folder key={folder.path} tree={folder} depth={depth + 1} onSelect={onSelect} />)}
-    {tree.files.map((file) => <FileButton key={file.path} file={file} depth={depth + 1} onSelect={onSelect} />)}
+    {actions.renamingFolderPath === tree.path ? <form class="folder-rename" style={{ "--tree-depth": depth }} onSubmit={(event) => {
+      event.preventDefault();
+      actions.onRenameFolder(tree, new FormData(event.currentTarget).get("name")?.toString() || "");
+    }}>
+      <span aria-hidden="true">›</span>
+      <input name="name" defaultValue={tree.name} aria-label={`Rename ${tree.name}`} ref={(input) => {
+        if (!input) return;
+        requestAnimationFrame(() => { input.focus(); input.select(); });
+      }} onBlur={actions.onCancelFolderRename} onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); actions.onCancelFolderRename(); }
+      }} />
+    </form> : <summary class={actions.dropTargetPath === tree.path ? "is-drop-target" : ""} style={{ "--tree-depth": depth }} title={tree.path}
+      onContextMenu={(event) => actions.onFolderContextMenu(event, tree)}
+      onDragOver={(event) => actions.onDragOver(event, tree.path, group)} onDragLeave={(event) => actions.onDragLeave(event, tree.path)}
+      onDrop={(event) => actions.onDrop(event, tree.path, group)}>{tree.name}</summary>}
+    {tree.folders.map((folder) => <Folder key={folder.path} tree={folder} group={group} depth={depth + 1} onSelect={onSelect} actions={actions} />)}
+    {tree.files.map((file) => <FileButton key={file.path} file={file} depth={depth + 1} onSelect={onSelect} onContextMenu={actions.onContextMenu}
+      renaming={actions.renamingPath === file.path} onRename={actions.onRename} onCancelRename={actions.onCancelRename}
+      selected={actions.selectedPaths.includes(file.path)} primary={selectedPath.value === file.path}
+      onDragStart={actions.onDragStart} onDragEnd={actions.onDragEnd} />)}
   </details>;
 }
 
@@ -139,7 +204,7 @@ function allFiles(tree: FileTree): FileItem[] {
   return [...tree.files, ...tree.folders.flatMap(allFiles)];
 }
 
-function FileList({ onSelect, onCreateComponent }: { onSelect: (file: FileItem) => void; onCreateComponent: (name: string) => Promise<boolean> }) {
+function FileList({ onSelect, onCreateComponent, actions }: { onSelect: (event: MouseEvent, file: FileItem) => void; onCreateComponent: (name: string) => Promise<boolean>; actions: FileTreeActions }) {
   const groups = groupedFiles(project.value?.files || [], section.value);
   const usesTailwind = project.value?.files.some((file) => file.path === "theme/tailwind.css");
   const [creating, setCreating] = useState(false);
@@ -149,7 +214,9 @@ function FileList({ onSelect, onCreateComponent }: { onSelect: (file: FileItem) 
   }
   return <div class="pb-3">
     {groups.map((group) => <div key={group.name}>
-        <div class="file-group">
+        <div class={`file-group ${actions.dropTargetPath === group.path ? "is-drop-target" : ""}`}
+          onDragOver={(event) => actions.onDragOver(event, group.path, group.name)} onDragLeave={(event) => actions.onDragLeave(event, group.path)}
+          onDrop={(event) => actions.onDrop(event, group.path, group.name)}>
           <span>{group.name}</span>
           {group.name.endsWith("template") && <small>{usesTailwind ? "Tailwind" : "Structure + styles"}</small>}
           {group.name === "Components" && <button class="component-add" aria-label="Add component" title="Add component" onClick={() => setCreating(true)}>+</button>}
@@ -166,24 +233,161 @@ function FileList({ onSelect, onCreateComponent }: { onSelect: (file: FileItem) 
           <button type="submit">Add</button>
           <button type="button" onClick={() => setCreating(false)}>Cancel</button>
         </form>}
-        {group.folders.map((folder) => <Folder key={folder.path} tree={folder} depth={0} onSelect={onSelect} />)}
-        {group.files.map((file) => <FileButton key={file.path} file={file} depth={0} onSelect={onSelect} />)}
+        {group.folders.map((folder) => <Folder key={folder.path} tree={folder} group={group.name} depth={0} onSelect={onSelect} actions={actions} />)}
+        {group.files.map((file) => <FileButton key={file.path} file={file} depth={0} onSelect={onSelect} onContextMenu={actions.onContextMenu}
+          renaming={actions.renamingPath === file.path} onRename={actions.onRename} onCancelRename={actions.onCancelRename}
+          selected={actions.selectedPaths.includes(file.path)} primary={selectedPath.value === file.path}
+          onDragStart={actions.onDragStart} onDragEnd={actions.onDragEnd} />)}
       </div>)}
   </div>;
 }
 
-function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull, onRefreshSync }: {
+type TreeContextTarget = { kind: "file"; file: FileItem } | { kind: "folder"; folder: FileTree };
+
+function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull, onRefreshSync, onRenameFile, onDuplicateFile, onDeleteFile, onRenameFolder, onDeleteFolder, onMoveFiles }: {
   onSelect: (file: FileItem) => void;
   onSectionChange: (nextSection: FileSection) => void;
   onCreateComponent: (name: string) => Promise<boolean>;
   onPush: () => void;
   onPull: () => void;
   onRefreshSync: () => Promise<void>;
+  onRenameFile: (file: FileItem, name: string) => Promise<boolean>;
+  onDuplicateFile: (file: FileItem) => Promise<void>;
+  onDeleteFile: (file: FileItem) => void;
+  onRenameFolder: (folder: FileTree, name: string) => Promise<boolean>;
+  onDeleteFolder: (folder: FileTree) => void;
+  onMoveFiles: (paths: string[], destination: string) => Promise<Record<string, string> | null>;
 }) {
   const syncState = sync.value?.state;
   const backend = "Google Drive";
   const [refreshing, setRefreshing] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ target: TreeContextTarget; x: number; y: number } | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renamingFolderPath, setRenamingFolderPath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [dragPaths, setDragPaths] = useState<string[]>([]);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const selectionAnchor = useRef<string | null>(null);
   const { canPull, canPush } = syncActions(syncState);
+  const selectionOrder = fileSelectionOrder(project.value?.files || [], section.value);
+
+  useEffect(() => {
+    const available = new Set(project.value?.files.map((file) => file.path) || []);
+    setSelectedPaths((current) => {
+      const next = current.filter((path) => available.has(path));
+      if (next.length === 0 && selectedPath.value && available.has(selectedPath.value)) return [selectedPath.value];
+      return next.length === current.length ? current : next;
+    });
+  }, [project.value, selectedPath.value]);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", keydown);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", keydown);
+    };
+  }, [contextMenu]);
+  const treeActions: FileTreeActions = {
+    renamingPath,
+    renamingFolderPath,
+    selectedPaths,
+    dropTargetPath,
+    onCancelRename: () => setRenamingPath(null),
+    onRename: async (file, name) => {
+      if (await onRenameFile(file, name)) setRenamingPath(null);
+    },
+    onContextMenu: (event, file) => {
+      event.preventDefault();
+      if (!selectedPaths.includes(file.path)) {
+        setSelectedPaths([file.path]);
+        selectionAnchor.current = file.path;
+      }
+      setContextMenu({
+        target: { kind: "file", file },
+        x: Math.min(event.clientX, window.innerWidth - 164),
+        y: Math.min(event.clientY, window.innerHeight - 112),
+      });
+    },
+    onCancelFolderRename: () => setRenamingFolderPath(null),
+    onRenameFolder: async (folder, name) => {
+      if (await onRenameFolder(folder, name)) setRenamingFolderPath(null);
+    },
+    onFolderContextMenu: (event, folder) => {
+      event.preventDefault();
+      setContextMenu({
+        target: { kind: "folder", folder },
+        x: Math.min(event.clientX, window.innerWidth - 164),
+        y: Math.min(event.clientY, window.innerHeight - 88),
+      });
+    },
+    canDrop: (path, group) => {
+      if (!path || dragPaths.length === 0) return false;
+      const files = dragPaths.map((dragPath) => project.value?.files.find((file) => file.path === dragPath)).filter(Boolean) as FileItem[];
+      return files.length === dragPaths.length && files.every((file) => file.group === group)
+        && files.some((file) => file.path.slice(0, file.path.lastIndexOf("/")) !== path);
+    },
+    onDragStart: (event, file) => {
+      const paths = selectedPaths.includes(file.path) ? selectedPaths : [file.path];
+      if (!selectedPaths.includes(file.path)) {
+        setSelectedPaths(paths);
+        selectionAnchor.current = file.path;
+      }
+      setDragPaths(paths);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", paths.join("\n"));
+      }
+    },
+    onDragEnd: () => {
+      setDragPaths([]);
+      setDropTargetPath(null);
+    },
+    onDragOver: (event, path, group) => {
+      if (!treeActions.canDrop(path, group)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      setDropTargetPath(path);
+    },
+    onDragLeave: (event, path) => {
+      const current = event.currentTarget as HTMLElement;
+      if (event.relatedTarget instanceof Node && current.contains(event.relatedTarget)) return;
+      if (dropTargetPath === path) setDropTargetPath(null);
+    },
+    onDrop: async (event, path, group) => {
+      if (!treeActions.canDrop(path, group)) return;
+      event.preventDefault();
+      setDropTargetPath(null);
+      const moved = await onMoveFiles(dragPaths, path);
+      setDragPaths([]);
+      if (!moved) return;
+      const next = dragPaths.map((source) => moved[source] || source);
+      setSelectedPaths(next);
+      if (selectionAnchor.current) selectionAnchor.current = moved[selectionAnchor.current] || selectionAnchor.current;
+    },
+  };
+
+  const selectFile = (event: MouseEvent, file: FileItem) => {
+    if (event.shiftKey && selectionAnchor.current) {
+      const anchor = selectionOrder.findIndex((candidate) => candidate.path === selectionAnchor.current);
+      const target = selectionOrder.findIndex((candidate) => candidate.path === file.path);
+      if (anchor >= 0 && target >= 0) {
+        const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
+        setSelectedPaths(selectionOrder.slice(start, end + 1).map((candidate) => candidate.path));
+      } else {
+        setSelectedPaths([file.path]);
+        selectionAnchor.current = file.path;
+      }
+    } else {
+      setSelectedPaths([file.path]);
+      selectionAnchor.current = file.path;
+    }
+    onSelect(file);
+  };
   return <aside class="flex min-w-0 flex-col bg-rail">
     <header class="drive-identity">
       <DriveMark />
@@ -225,12 +429,26 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
         role="tab"
         aria-selected={section.value === item}
         class={`area-tab ${section.value === item ? "is-active" : ""}`}
-        onClick={() => onSectionChange(item)}
+        onClick={() => { setSelectedPaths([]); selectionAnchor.current = null; onSectionChange(item); }}
       >{item[0].toUpperCase() + item.slice(1)}</button>)}
     </div>
     <nav class="mt-1 min-h-0 flex-1 overflow-auto" aria-label={`${section.value} files`}>
-      <FileList onSelect={onSelect} onCreateComponent={onCreateComponent} />
+      <FileList onSelect={selectFile} onCreateComponent={onCreateComponent} actions={treeActions} />
     </nav>
+    {contextMenu && <div class="file-context-menu" role="menu" aria-label={`${contextMenu.target.kind === "file" ? contextMenu.target.file.label : contextMenu.target.folder.name} actions`} style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+      {contextMenu.target.kind === "file" && <button role="menuitem" onClick={() => { const file = contextMenu.target.kind === "file" && contextMenu.target.file; setContextMenu(null); if (file) onDuplicateFile(file); }}>Duplicate</button>}
+      <button role="menuitem" onClick={() => {
+        if (contextMenu.target.kind === "file") setRenamingPath(contextMenu.target.file.path);
+        else setRenamingFolderPath(contextMenu.target.folder.path);
+        setContextMenu(null);
+      }}>Rename</button>
+      <span />
+      <button class="is-danger" role="menuitem" onClick={() => {
+        const target = contextMenu.target;
+        setContextMenu(null);
+        if (target.kind === "file") onDeleteFile(target.file); else onDeleteFolder(target.folder);
+      }}>Delete</button>
+    </div>}
   </aside>;
 }
 
@@ -304,6 +522,7 @@ function Workspace({ onSourceInput, onOpenTemplate, onSave, onPreview, onReload,
       /> : previewSource && usesPdfCanvas(file, preview) ? <PdfPreview
         key={`${previewSource}-${previewRevision.value}`}
         url={previewSource}
+        filename={(file?.path.split("/").at(-1) || "document.pdf").replace(/\.(?:page|deck)\.md$/i, ".pdf")}
         onReady={() => { renderState.value = ""; }}
       /> : previewSource ? <iframe
         key={`${previewSource}-${previewRevision.value}`}
@@ -354,12 +573,13 @@ function SyncFact({ label, value, attention = false }: { label: string; value: s
 }
 
 function ChangeReview({ title, changes, empty }: { title: string; changes: FileChange[] | undefined; empty: string }) {
+  const label = (kind: FileChange["kind"]) => kind === "removed" ? "D" : kind[0].toUpperCase();
   return <section class="change-review">
     <header><strong>{title}</strong><span>{changes ? `${changes.length} file${changes.length === 1 ? "" : "s"}` : "Inspecting…"}</span></header>
     {!changes ? <div class="change-review-loading"><span />Comparing file versions…</div>
       : changes.length === 0 ? <p>{empty}</p>
       : <ul>{changes.map((change) => <li key={`${change.kind}:${change.path}`}>
-        <span class={`change-kind is-${change.kind}`}>{change.kind[0].toUpperCase()}</span>
+        <span class={`change-kind is-${change.kind}`} title={change.kind === "removed" ? "Deleted" : change.kind}>{label(change.kind)}</span>
         <code title={change.path}>{change.path}</code>
       </li>)}</ul>}
   </section>;
@@ -434,11 +654,34 @@ function PullDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
   </form></dialog>;
 }
 
+type DeleteTarget = { kind: "file" | "folder"; label: string; path: string };
+
+function DeleteFileDialog({ dialog, target, onConfirm }: {
+  dialog: preact.RefObject<HTMLDialogElement>;
+  target: DeleteTarget | null;
+  onConfirm: () => void;
+}) {
+  return <dialog ref={dialog} class="stamp-dialog file-delete-dialog">
+    <form method="dialog" class="p-6">
+      <span class="dialog-kicker is-danger">Delete {target?.kind}</span>
+      <h2>Delete “{target?.label}”?</h2>
+      <p>{target?.kind === "folder" ? "This removes the folder and every file inside it from your local Stamp workspace." : "This removes the file from your local Stamp workspace."} The deletion will be included in your next push.</p>
+      <div class="delete-file-path" title={target?.path}>{target?.path}</div>
+      <div class="dialog-actions">
+        <button type="button" onClick={() => dialog.current?.close("cancel")}>Cancel</button>
+        <button type="button" class="danger" onClick={onConfirm}>Delete {target?.kind}</button>
+      </div>
+    </form>
+  </dialog>;
+}
+
 export function App() {
   const editorFocused = useRef(false);
   const savedSource = useRef("");
   const pushDialog = useRef<HTMLDialogElement>(null);
   const pullDialog = useRef<HTMLDialogElement>(null);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const regeneratePreview = () => {
     const file = selectedFile.value;
@@ -586,6 +829,109 @@ export function App() {
     }
   };
 
+  const fileActionAllowed = (file: FileItem) => {
+    if (file.path === selectedPath.value && draftDirty.value) {
+      showNotice("Save or reload this draft before changing its file.");
+      return false;
+    }
+    return true;
+  };
+
+  const renameFile = async (file: FileItem, name: string) => {
+    if (!fileActionAllowed(file)) return false;
+    try {
+      const result = await api.renameFile(file.path, name);
+      if (selectedPath.value === file.path) selectedPath.value = result.path;
+      await refresh();
+      const renamed = project.value?.files.find((item) => item.path === result.path);
+      if (renamed) await chooseFile(renamed);
+      showNotice(result.message);
+      return true;
+    } catch (error) {
+      showNotice((error as Error).message, true);
+      return false;
+    }
+  };
+
+  const duplicateFile = async (file: FileItem) => {
+    try {
+      const result = await api.duplicateFile(file.path);
+      await refresh();
+      const duplicate = project.value?.files.find((item) => item.path === result.path);
+      if (duplicate) await chooseFile(duplicate);
+      showNotice(result.message);
+    } catch (error) { showNotice((error as Error).message, true); }
+  };
+
+  const requestDeleteFile = (file: FileItem) => {
+    if (!fileActionAllowed(file)) return;
+    setDeleteTarget({ kind: "file", label: file.label, path: file.path });
+    requestAnimationFrame(() => deleteDialog.current?.showModal());
+  };
+
+  const renameFolder = async (folder: FileTree, name: string) => {
+    const selected = selectedPath.value;
+    if (selected?.startsWith(`${folder.path}/`) && draftDirty.value) {
+      showNotice("Save or reload this draft before changing its folder.");
+      return false;
+    }
+    try {
+      const result = await api.renameFolder(folder.path, name);
+      if (selected?.startsWith(`${folder.path}/`)) {
+        selectedPath.value = `${result.path}${selected.slice(folder.path.length)}`;
+      }
+      await refresh();
+      showNotice(result.message);
+      return true;
+    } catch (error) {
+      showNotice((error as Error).message, true);
+      return false;
+    }
+  };
+
+  const requestDeleteFolder = (folder: FileTree) => {
+    if (selectedPath.value?.startsWith(`${folder.path}/`) && draftDirty.value) {
+      showNotice("Save or reload this draft before deleting its folder.");
+      return;
+    }
+    setDeleteTarget({ kind: "folder", label: folder.name, path: folder.path });
+    requestAnimationFrame(() => deleteDialog.current?.showModal());
+  };
+
+  const moveFiles = async (paths: string[], destination: string) => {
+    if (selectedPath.value && paths.includes(selectedPath.value) && draftDirty.value) {
+      showNotice("Save or reload this draft before moving it.");
+      return null;
+    }
+    try {
+      const result = await api.moveFiles(paths, destination);
+      if (selectedPath.value && result.moves[selectedPath.value]) selectedPath.value = result.moves[selectedPath.value];
+      await refresh();
+      showNotice(result.message);
+      return result.moves;
+    } catch (error) {
+      showNotice((error as Error).message, true);
+      return null;
+    }
+  };
+
+  const deleteFile = async () => {
+    if (!deleteTarget) return;
+    try {
+      const wasSelected = selectedPath.value === deleteTarget.path || selectedPath.value?.startsWith(`${deleteTarget.path}/`);
+      const result = deleteTarget.kind === "folder" ? await api.deleteFolder(deleteTarget.path) : await api.deleteFile(deleteTarget.path);
+      if (wasSelected) {
+        selectedPath.value = null;
+        source.value = "";
+        previewPath.value = null;
+      }
+      deleteDialog.current?.close("deleted");
+      setDeleteTarget(null);
+      await refresh();
+      showNotice(result.message);
+    } catch (error) { showNotice((error as Error).message, true); }
+  };
+
   const runSyncAction = async (action: () => Promise<{ message: string }>, dialog: HTMLDialogElement | null) => {
     try {
       if (!(await save())) return;
@@ -657,7 +1003,8 @@ export function App() {
 
   return <>
     <main class="app-shell">
-      <Sidebar onSelect={chooseFile} onSectionChange={changeSection} onCreateComponent={createComponent} onPush={() => openSyncDialog(pushDialog.current)} onPull={() => openSyncDialog(pullDialog.current)} onRefreshSync={refreshSyncStatus} />
+      <Sidebar onSelect={chooseFile} onSectionChange={changeSection} onCreateComponent={createComponent} onPush={() => openSyncDialog(pushDialog.current)} onPull={() => openSyncDialog(pullDialog.current)} onRefreshSync={refreshSyncStatus}
+        onRenameFile={renameFile} onDuplicateFile={duplicateFile} onDeleteFile={requestDeleteFile} onRenameFolder={renameFolder} onDeleteFolder={requestDeleteFolder} onMoveFiles={moveFiles} />
       <Workspace onSourceInput={onSourceInput} onOpenTemplate={openRelatedTemplate} onSave={save} onPreview={saveAndPreview} onReload={reloadSource}
         onFocusChange={(focused) => {
           editorFocused.current = focused;
@@ -666,6 +1013,7 @@ export function App() {
     </main>
     <PushDialog dialog={pushDialog} onConfirm={(message, forceWithLease) => runSyncAction(() => api.push(message, forceWithLease), pushDialog.current)} />
     <PullDialog dialog={pullDialog} onConfirm={() => runSyncAction(api.pull, pullDialog.current)} />
+    <DeleteFileDialog dialog={deleteDialog} target={deleteTarget} onConfirm={deleteFile} />
     {notice.value && <aside class={`notice ${notice.value.error ? "is-error" : ""}`} role="status">{notice.value.message}</aside>}
   </>;
 }

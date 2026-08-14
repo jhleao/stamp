@@ -143,7 +143,12 @@ func writeStarterTheme(root string) error {
 		{"page.html.tmpl", pageTemplate},
 		{"deck.html.tmpl", deckTemplate},
 		{"tailwind.css", tailwindSource},
-		{"components/callout.tsx", `export default function Callout({ children }) {
+		{"components/callout.tsx", `export const metadata = {
+  description: "A quiet aside for supporting information.",
+  usage: "Use sparingly for context that should not interrupt the main narrative."
+};
+
+export default function Callout({ children }) {
   return (
     <aside className="callout my-6 border-y border-stone-300 bg-stone-50 px-5 py-4 text-sm leading-relaxed">
       {children}
@@ -422,9 +427,16 @@ const agentGuide = `# Working with this Stamp project
 This workspace is a shared document pack. Keep the loop small:
 
 1. Run ` + "`stamp pull`" + ` before changing an existing shared project.
-2. Edit Markdown in documents/ or decks/, and spreadsheets in spreadsheets/.
-3. Use Studio's preview and inspect the result.
-4. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
+2. Before authoring, inspect theme/README.md, theme/components/, and the theme
+   examples. Open representative existing documents in Studio to learn the
+   workspace's typography, spacing, composition, and visual vocabulary.
+3. Reuse existing components and their variants before creating new ones. Read
+   each component's exported metadata and implementation; its description and
+   usage are design instructions, not just API documentation.
+4. Edit Markdown in documents/ or decks/, and spreadsheets in spreadsheets/.
+5. Use Studio's preview and inspect every affected page or slide. Match the
+   established visual language and test both sparse and dense content.
+6. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
 
 The theme/ folder controls appearance. Read theme/README.md before changing it.
 Never edit outputs/ directly. If pull or push reports a conflict, preserve both
@@ -450,6 +462,11 @@ Content stays readable:
     <metric-card value="$4.2M">Up 18% year over year.</metric-card>
 
 The matching components/metric-card.tsx can use:
+
+    export const metadata = {
+      description: "A headline metric with a short supporting caption.",
+      usage: "Use for one key number; group related metrics with Columns."
+    };
 
     export default function MetricCard({ props, children }) {
       return <figure className="grid grid-cols-[1fr_auto] gap-3 border-y border-stone-300 py-5">

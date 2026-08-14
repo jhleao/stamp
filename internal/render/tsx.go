@@ -55,6 +55,15 @@ type componentProgram struct {
 	components []compiledComponent
 }
 
+// ComponentInfo is optional author-written guidance exported beside a
+// component. Stamp surfaces it to agents without introducing a second
+// manifest that can drift away from the implementation.
+type ComponentInfo struct {
+	Name        string
+	Description string
+	Usage       string
+}
+
 type cachedComponentProgram struct {
 	fingerprint [sha256.Size]byte
 	program     *componentProgram
@@ -160,6 +169,7 @@ type componentRenderer struct {
 	runtime    *goja.Runtime
 	render     goja.Callable
 	components map[string]goja.Value
+	metadata   map[string]ComponentInfo
 	program    *componentProgram
 }
 
@@ -174,7 +184,12 @@ func (program *componentProgram) newRenderer() (*componentRenderer, error) {
 	if !ok {
 		return nil, errors.New("component runtime did not initialize")
 	}
-	result := &componentRenderer{runtime: runtime, render: render, components: make(map[string]goja.Value, len(program.components)), program: program}
+	result := &componentRenderer{
+		runtime: runtime, render: render,
+		components: make(map[string]goja.Value, len(program.components)),
+		metadata:   make(map[string]ComponentInfo, len(program.components)),
+		program:    program,
+	}
 	for _, component := range program.components {
 		if _, err := runtime.RunString(component.code); err != nil {
 			return nil, fmt.Errorf("component %s: %w", component.name, err)
@@ -189,6 +204,38 @@ func (program *componentProgram) newRenderer() (*componentRenderer, error) {
 			return nil, fmt.Errorf("component %s must export a default function", component.name)
 		}
 		result.components[component.name] = fn
+		info := ComponentInfo{Name: component.name}
+		if metadata := module.Get("metadata"); metadata != nil && !goja.IsUndefined(metadata) && !goja.IsNull(metadata) {
+			object := metadata.ToObject(runtime)
+			info.Description = metadataString(object.Get("description"))
+			info.Usage = metadataString(object.Get("usage"))
+		}
+		result.metadata[component.name] = info
+	}
+	return result, nil
+}
+
+func metadataString(value goja.Value) string {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return ""
+	}
+	return strings.TrimSpace(value.String())
+}
+
+// ComponentCatalog returns the workspace's components and their optional
+// author guidance in stable filename order.
+func ComponentCatalog(root string) ([]ComponentInfo, error) {
+	program, err := loadComponentProgram(root)
+	if err != nil {
+		return nil, err
+	}
+	renderer, err := program.newRenderer()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ComponentInfo, 0, len(program.components))
+	for _, component := range program.components {
+		result = append(result, renderer.metadata[component.name])
 	}
 	return result, nil
 }

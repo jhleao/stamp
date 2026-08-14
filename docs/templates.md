@@ -53,6 +53,11 @@ The appearance lives in `components/metric-card.tsx`, using Tailwind
 utilities:
 
 ```tsx
+export const metadata = {
+  description: "A headline metric with a short supporting caption.",
+  usage: "Use for one key number; group related metrics with Columns."
+};
+
 export default function MetricCard({ props, children }) {
   return (
     <figure className="grid grid-cols-[1fr_auto] gap-3 border-y border-zinc-300 py-5">
@@ -63,6 +68,12 @@ export default function MetricCard({ props, children }) {
   );
 }
 ```
+
+Metadata is optional, but recommended. `stamp skill` reads it from the current
+workspace and prints a compact component catalog for coding agents. Keep the
+description focused on what the component communicates and the usage focused
+on when to choose it, important variants, and content constraints. The TSX file
+remains the source of truth; there is no separate component manifest.
 
 A component receives `props` for tag attributes, `children` for its rendered
 body, `meta` for YAML front matter, and `format` for its rendering context.

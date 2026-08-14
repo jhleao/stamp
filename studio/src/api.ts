@@ -21,6 +21,32 @@ export const api = {
     headers: { "Content-Type": "text/plain" },
     body,
   }),
+  renameFile: (path: string, name: string) => request<{ path: string; message: string }>("api/file", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, name }),
+  }),
+  duplicateFile: (path: string) => request<{ path: string; message: string }>("api/file/duplicate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  }),
+  deleteFile: (path: string) => request<{ message: string }>(`api/file?path=${encodeURIComponent(path)}`, {
+    method: "DELETE",
+  }),
+  renameFolder: (path: string, name: string) => request<{ path: string; message: string }>("api/folder", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, name }),
+  }),
+  deleteFolder: (path: string) => request<{ message: string }>(`api/folder?path=${encodeURIComponent(path)}`, {
+    method: "DELETE",
+  }),
+  moveFiles: (paths: string[], destination: string) => request<{ moves: Record<string, string>; message: string }>("api/files/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths, destination }),
+  }),
   push: (message: string, forceWithLease = "") => request<{ message: string }>("api/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

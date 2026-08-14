@@ -35,13 +35,13 @@ jobs:
       - name: Install frontend and release dependencies
         run: npm ci
 
+      - name: Build embedded Studio
+        run: npm run build:studio
+
       - name: Test
         run: |
           npm run test:studio
           go test ./...
-
-      - name: Build embedded Studio
-        run: npm run build:studio
 
       - name: Release
         env:

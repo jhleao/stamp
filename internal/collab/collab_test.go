@@ -40,6 +40,20 @@ func (f *fakeDrive) Children(context.Context, string) ([]stampdrive.Item, error)
 func (f *fakeDrive) Trash(context.Context, string) error                         { return nil }
 func (f *fakeDrive) Retain(context.Context, stampdrive.Item) error               { return nil }
 
+type recordingDrive struct {
+	fakeDrive
+	uploaded []byte
+}
+
+func (f *recordingDrive) UpdateNamedFile(_ context.Context, _ string, _ string, _ string, contents io.Reader) (stampdrive.Item, error) {
+	data, err := io.ReadAll(contents)
+	if err != nil {
+		return stampdrive.Item{}, err
+	}
+	f.uploaded = data
+	return stampdrive.Item{ID: "canonical", Version: "3"}, nil
+}
+
 func pullFixture(t *testing.T) (string, *fakeDrive) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "local")
@@ -163,5 +177,40 @@ func TestPushLeaseRequiresTheObservedRemoteVersion(t *testing.T) {
 				t.Fatalf("checkLease() error = %v, wantError %v", err, test.wantError)
 			}
 		})
+	}
+}
+
+func TestPushArchiveOmitsDeletedWorkspaceFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "local")
+	if _, err := project.Create(root, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(root, "documents", "remove-me.page.md")
+	if err := os.WriteFile(removed, []byte("# Remove me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := project.FileHashes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteState(root, project.RemoteState{
+		FileID: "canonical", ProjectFolderID: "project", CurrentFolderID: "current",
+		BaseVersion: "2", Files: hashes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(removed); err != nil {
+		t.Fatal(err)
+	}
+	drive := &recordingDrive{fakeDrive: fakeDrive{item: stampdrive.Item{ID: "canonical", Version: "2"}}}
+	if _, err := push(context.Background(), drive, root, "root", "cleanup", "", func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	unpacked := t.TempDir()
+	if err := bundle.UnpackReader(bytes.NewReader(drive.uploaded), int64(len(drive.uploaded)), unpacked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(unpacked, "documents", "remove-me.page.md")); !os.IsNotExist(err) {
+		t.Fatalf("deleted file remains in pushed archive: %v", err)
 	}
 }

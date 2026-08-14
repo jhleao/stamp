@@ -14,6 +14,7 @@ import (
 	"github.com/jhleao/stamp/internal/doctor"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/studio"
 )
 
@@ -58,6 +59,23 @@ func run(args []string) error {
 			return errors.New("usage: stamp skill")
 		}
 		fmt.Print(project.AgentGuide())
+		catalog, err := render.ComponentCatalog(".")
+		if err != nil {
+			return fmt.Errorf("read workspace components: %w", err)
+		}
+		if len(catalog) > 0 {
+			fmt.Println("\n## Components in this workspace")
+			for _, component := range catalog {
+				fmt.Printf("\n- <%s>", component.Name)
+				if component.Description != "" {
+					fmt.Printf(": %s", component.Description)
+				}
+				if component.Usage != "" {
+					fmt.Printf("\n  Use: %s", component.Usage)
+				}
+				fmt.Println()
+			}
+		}
 		return nil
 	case "tutorial":
 		if len(args) != 1 {
@@ -107,6 +125,17 @@ The folder contains readable Markdown content and its complete visual theme.
 Edit Content for the words. Edit Templates for TSX components, Tailwind, and
 assets. Save and inspect the preview before sharing.
 
+## 5. Start a session with an AI agent
+
+Most Stamp work is designed to happen with an AI agent. In Studio, click the
+robot button at the top right of the sidebar. It copies a ready-to-paste prompt
+that gives the agent this workspace's absolute path and asks it to run
+` + "`stamp skill`" + ` before editing. Paste that prompt into your coding agent to begin.
+
+You can also prepare an agent manually from the project folder:
+
+    stamp skill
+
 ## Everyday collaboration
 
     stamp pull
@@ -126,8 +155,8 @@ run ` + "`stamp login`" + `:
     cd first-project
     stamp studio
 
-For coding agents, run ` + "`stamp skill`" + ` or point the agent at the project folder;
-new projects already contain AGENTS.md and CLAUDE.md instructions.
+The Studio robot button is the quickest way to start another agent session.
+New projects also contain AGENTS.md and CLAUDE.md instructions.
 `
 
 func newCommand(args []string) error {

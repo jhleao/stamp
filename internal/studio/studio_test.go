@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -64,6 +65,147 @@ func TestCreateComponent(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil || !strings.Contains(string(data), `className="metric-card my-6`) || !strings.Contains(string(data), `props.label`) {
 		t.Fatalf("component = %q, %v", data, err)
+	}
+}
+
+func TestFileTreeOperations(t *testing.T) {
+	root := t.TempDir()
+	documents := filepath.Join(root, "documents")
+	if err := os.MkdirAll(documents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(documents, "brief.page.md")
+	if err := os.WriteFile(original, []byte("# Brief\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{root: root, clients: map[chan string]struct{}{}}
+
+	duplicateRecorder := httptest.NewRecorder()
+	duplicateRequest := httptest.NewRequest("POST", "/api/file/duplicate", strings.NewReader(`{"path":"documents/brief.page.md"}`))
+	server.duplicateFile(duplicateRecorder, duplicateRequest)
+	if duplicateRecorder.Code != 200 {
+		t.Fatalf("duplicate status = %d: %s", duplicateRecorder.Code, duplicateRecorder.Body.String())
+	}
+	copyPath := filepath.Join(documents, "brief-copy.page.md")
+	if data, err := os.ReadFile(copyPath); err != nil || string(data) != "# Brief\n" {
+		t.Fatalf("duplicate = %q, %v", data, err)
+	}
+
+	renameRecorder := httptest.NewRecorder()
+	renameRequest := httptest.NewRequest("PATCH", "/api/file", strings.NewReader(`{"path":"documents/brief-copy.page.md","name":"review.page.md"}`))
+	server.renameFile(renameRecorder, renameRequest)
+	if renameRecorder.Code != 200 {
+		t.Fatalf("rename status = %d: %s", renameRecorder.Code, renameRecorder.Body.String())
+	}
+	renamed := filepath.Join(documents, "review.page.md")
+	if _, err := os.Stat(renamed); err != nil {
+		t.Fatalf("renamed file: %v", err)
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest("DELETE", "/api/file?path=documents/review.page.md", nil)
+	server.deleteFile(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != 200 {
+		t.Fatalf("delete status = %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+	if _, err := os.Stat(renamed); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted file still exists: %v", err)
+	}
+}
+
+func TestFolderTreeOperations(t *testing.T) {
+	root := t.TempDir()
+	client := filepath.Join(root, "documents", "Client")
+	if err := os.MkdirAll(client, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(client, "brief.page.md"), []byte("# Brief\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{root: root, clients: map[chan string]struct{}{}}
+
+	renameRecorder := httptest.NewRecorder()
+	renameRequest := httptest.NewRequest("PATCH", "/api/folder", strings.NewReader(`{"path":"documents/Client","name":"Customer"}`))
+	server.renameFolder(renameRecorder, renameRequest)
+	if renameRecorder.Code != 200 {
+		t.Fatalf("rename folder status = %d: %s", renameRecorder.Code, renameRecorder.Body.String())
+	}
+	renamed := filepath.Join(root, "documents", "Customer")
+	if _, err := os.Stat(filepath.Join(renamed, "brief.page.md")); err != nil {
+		t.Fatalf("renamed folder content: %v", err)
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest("DELETE", "/api/folder?path=documents/Customer", nil)
+	server.deleteFolder(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != 200 {
+		t.Fatalf("delete folder status = %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+	if _, err := os.Stat(renamed); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted folder still exists: %v", err)
+	}
+}
+
+func TestMoveFilesMovesSelectionAndRejectsCollisionsBeforeChangingAnything(t *testing.T) {
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"documents/One/alpha.page.md":    "# Alpha\n",
+		"documents/Two/beta.page.md":     "# Beta\n",
+		"documents/Target/index.page.md": "# Target\n",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := &Server{root: root, clients: map[chan string]struct{}{}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest("POST", "/api/files/move", strings.NewReader(`{"paths":["documents/One/alpha.page.md","documents/Two/beta.page.md"],"destination":"documents/Target"}`))
+	server.moveFiles(recorder, request)
+	if recorder.Code != 200 {
+		t.Fatalf("move files status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	for _, name := range []string{"alpha.page.md", "beta.page.md"} {
+		if _, err := os.Stat(filepath.Join(root, "documents", "Target", name)); err != nil {
+			t.Fatalf("moved %s: %v", name, err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "documents", "One", "keep.page.md"), []byte("# Keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "documents", "Two", "index.page.md"), []byte("# Collision\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	collisionRecorder := httptest.NewRecorder()
+	collisionRequest := httptest.NewRequest("POST", "/api/files/move", strings.NewReader(`{"paths":["documents/One/keep.page.md","documents/Two/index.page.md"],"destination":"documents/Target"}`))
+	server.moveFiles(collisionRecorder, collisionRequest)
+	if collisionRecorder.Code != 409 {
+		t.Fatalf("collision status = %d: %s", collisionRecorder.Code, collisionRecorder.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "documents", "One", "keep.page.md")); err != nil {
+		t.Fatalf("validation moved a file before reporting collision: %v", err)
+	}
+}
+
+func TestSplitFileNameKeepsStampSuffixTogether(t *testing.T) {
+	stem, suffix := splitFileName("quarterly.page.md")
+	if stem != "quarterly" || suffix != ".page.md" {
+		t.Fatalf("splitFileName = %q, %q", stem, suffix)
+	}
+}
+
+func TestValidFileName(t *testing.T) {
+	if !validFileName("x0-review.page.md") {
+		t.Fatal("ordinary file name was rejected")
+	}
+	for _, name := range []string{"", "..", "nested/review.page.md", `nested\review.page.md`} {
+		if validFileName(name) {
+			t.Fatalf("unsafe file name %q was accepted", name)
+		}
 	}
 }
 

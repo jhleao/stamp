@@ -7,6 +7,7 @@ GlobalWorkerOptions.workerSrc = pdfWorkerURL;
 
 interface Props {
   url: string;
+  filename: string;
   onReady: () => void;
 }
 
@@ -39,7 +40,13 @@ function PageCanvas({ page, availableWidth, zoom }: PageCanvasProps) {
   return <article class="pdf-sheet"><canvas ref={canvas} /></article>;
 }
 
-export function PdfPreview({ url, onReady }: Props) {
+function DownloadIcon() {
+  return <svg viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10" />
+  </svg>;
+}
+
+export function PdfPreview({ url, filename, onReady }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
@@ -80,13 +87,18 @@ export function PdfPreview({ url, onReady }: Props) {
     };
   }, [url]);
 
-  return <div ref={container} class="pdf-preview" aria-busy={!document && !error}>
-    <div class="pdf-zoom" role="group" aria-label="PDF zoom">
-      <button aria-label="Zoom out" title="Zoom out" disabled={zoom <= 50} onClick={() => setZoom(clampZoom(zoom - 10))}>−</button>
-      <button class="pdf-zoom-value" aria-label="Reset zoom" title="Fit preview" disabled={zoom === 100} onClick={() => setZoom(100)}>{zoom}%</button>
-      <button aria-label="Zoom in" title="Zoom in" disabled={zoom >= 200} onClick={() => setZoom(clampZoom(zoom + 10))}>+</button>
+  return <div class="pdf-preview-container">
+    <div ref={container} class="pdf-preview" aria-busy={!document && !error}>
+      <div class="pdf-zoom" role="group" aria-label="PDF zoom">
+        <button aria-label="Zoom out" title="Zoom out" disabled={zoom <= 50} onClick={() => setZoom(clampZoom(zoom - 10))}>−</button>
+        <button class="pdf-zoom-value" aria-label="Reset zoom" title="Fit preview" disabled={zoom === 100} onClick={() => setZoom(100)}>{zoom}%</button>
+        <button aria-label="Zoom in" title="Zoom in" disabled={zoom >= 200} onClick={() => setZoom(clampZoom(zoom + 10))}>+</button>
+      </div>
+      {error ? <div class="empty-pane">{error}</div> : pages.map((page) =>
+        <PageCanvas key={page.pageNumber} page={page} availableWidth={availableWidth} zoom={zoom} />)}
     </div>
-    {error ? <div class="empty-pane">{error}</div> : pages.map((page) =>
-      <PageCanvas key={page.pageNumber} page={page} availableWidth={availableWidth} zoom={zoom} />)}
+    {document && !error && <a class="pdf-download" href={url} download={filename} aria-label={`Download ${filename}`} title={`Download ${filename}`}>
+      <DownloadIcon />
+    </a>}
   </div>;
 }

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
@@ -95,6 +96,9 @@ func All(root string) ([]Result, error) {
 	if err := os.MkdirAll(filepath.Join(root, "outputs"), 0o755); err != nil {
 		return nil, err
 	}
+	if err := pruneOutputs(root, sources); err != nil {
+		return nil, err
+	}
 	results := make([]Result, 0, len(sources))
 	var problems []string
 	var printer *chromePrinter
@@ -121,6 +125,56 @@ func All(root string) ([]Result, error) {
 		return results, fmt.Errorf("render failed:\n  %s", strings.Join(problems, "\n  "))
 	}
 	return results, nil
+}
+
+// pruneOutputs removes derived files whose source no longer exists. Without
+// this reconciliation, a deleted document leaves an old PDF behind and push
+// reasonably mistakes that PDF for a current Drive mirror.
+func pruneOutputs(root string, sources []string) error {
+	expected := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		base := outputBase(source)
+		switch kind(source) {
+		case "page", "deck":
+			base, _ = markdownOutputBase(root, source, base, kind(source))
+			expected[filepath.Clean(outputPath(source, base+".pdf"))] = true
+		case "doc", "fodp":
+			expected[filepath.Clean(outputPath(source, base+".pdf"))] = true
+		case "fods":
+			expected[filepath.Clean(outputPath(source, base+".xlsx"))] = true
+		case "xlsx":
+			expected[filepath.Clean(outputPath(source, filepath.Base(source)))] = true
+		}
+	}
+	outputs := filepath.Join(root, "outputs")
+	var directories []string
+	if err := filepath.WalkDir(outputs, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != outputs {
+				directories = append(directories, path)
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if !expected[filepath.Clean(rel)] {
+			return os.Remove(path)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("reconcile outputs: %w", err)
+	}
+	for index := len(directories) - 1; index >= 0; index-- {
+		if err := os.Remove(directories[index]); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
+			return fmt.Errorf("remove empty output directory: %w", err)
+		}
+	}
+	return nil
 }
 
 func renderOne(root, source string, printer *chromePrinter) (string, error) {

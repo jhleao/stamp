@@ -14,7 +14,7 @@ build: frontend
 	mkdir -p bin
 	go build -ldflags "$(GO_LDFLAGS)" -o bin/stamp ./cmd/stamp
 
-test:
+test: frontend
 	npm run test:studio
 	go test ./...
 

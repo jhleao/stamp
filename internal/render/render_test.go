@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestPruneOutputsRemovesArtifactsForDeletedSources(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"documents/kept.page.md",
+		"outputs/documents/kept.pdf",
+		"outputs/documents/removed.pdf",
+		"outputs/empty/removed.pdf",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pruneOutputs(root, []string{"documents/kept.page.md"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "outputs", "documents", "kept.pdf")); err != nil {
+		t.Fatalf("current output was removed: %v", err)
+	}
+	for _, name := range []string{"outputs/documents/removed.pdf", "outputs/empty/removed.pdf", "outputs/empty"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); !os.IsNotExist(err) {
+			t.Fatalf("stale output remains at %s: %v", name, err)
+		}
+	}
+}
+
 func TestRenderComponents(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "theme", "components")
@@ -194,6 +223,34 @@ func TestComponentHTMLAtKeepsLocalFontFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(got), `url(theme/fonts/example.ttf)`) || strings.Contains(string(got), `data:font`) {
 		t.Fatalf("component preview should let the browser load the original local font: %s", got)
+	}
+}
+
+func TestComponentCatalogReadsOptionalMetadata(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "theme", "components")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{
+		"card.tsx": `export const metadata = {
+			description: "A decisive summary card.",
+			usage: "Use once per major conclusion."
+		};
+		export default function Card() { return <article />; }`,
+		"divider.tsx": `export default function Divider() { return <hr />; }`,
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	catalog, err := ComponentCatalog(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 2 || catalog[0] != (ComponentInfo{Name: "card", Description: "A decisive summary card.", Usage: "Use once per major conclusion."}) || catalog[1] != (ComponentInfo{Name: "divider"}) {
+		t.Fatalf("unexpected component catalog: %#v", catalog)
 	}
 }
 
