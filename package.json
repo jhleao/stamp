@@ -1,7 +1,7 @@
 {
   "name": "stamp",
   "version": "1.0.0",
-  "description": "Stamp is a small macOS utility for making document packs with people and agents. It keeps a project in one revisioned Google Drive file, works on ordinary local files, renders PDFs and XLSX files with established tools, and exposes the same small workflow through a CLI, a local Studio, and MCP.",
+  "description": "Stamp is a small macOS utility for making document packs with people and agents. It keeps a project in one revisioned Google Drive file, works on ordinary local files, renders PDFs and XLSX files with established tools, and exposes one small workflow through its CLI and local Studio.",
   "private": true,
   "type": "module",
   "scripts": {

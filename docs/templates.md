@@ -25,13 +25,12 @@ my-theme/
   examples/            # realistic visual tests
   assets/
   fonts/
-  outputs/              # generated example previews; not copied into projects
+  outputs/              # generated project previews
 ```
 
-Create one with `stamp template create my-theme`. Keep editing its examples
-and run `stamp template preview my-theme` until the look is right, then create a project with
-`stamp project create report --template my-theme`. Stamp copies the theme into
-the project, so future theme changes never surprise existing work.
+Every project owns this folder. Edit components, examples, assets, and Tailwind
+through Studio's Templates section, then preview the affected project files.
+There is no separate theme package, installation, or upgrade lifecycle.
 
 ## Content stays readable
 
@@ -92,9 +91,9 @@ reviewable, and safe to share through Drive.
 
 ## A good agent request
 
-> Open this Stamp theme. Make the examples look like our brand, create reusable
+> Open this Stamp project's theme. Make the examples look like our brand, create reusable
 > components for repeated patterns, add a dense and a long-content example,
-> then run `stamp template preview .` and inspect every result. Keep document Markdown about
+> then inspect every result in Studio. Keep document Markdown about
 > content, not layout.
 
 The generated `README.md` inside every theme gives an agent the same contract.

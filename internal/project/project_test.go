@@ -62,38 +62,6 @@ func TestStarterIsBrandNeutral(t *testing.T) {
 	}
 }
 
-func TestCreateWithTheme(t *testing.T) {
-	base := t.TempDir()
-	theme := filepath.Join(base, "brand")
-	if err := WriteStarterTheme(theme); err != nil {
-		t.Fatal(err)
-	}
-	custom := []byte(`aside { color: tomato; }`)
-	if err := os.WriteFile(filepath.Join(theme, "page.css"), custom, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(theme, "outputs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(theme, "outputs", "example.pdf"), []byte("preview"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Join(base, "project")
-	if _, err := CreateWithTheme(root, "Custom", theme); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(filepath.Join(root, "theme", "page.css"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(custom) {
-		t.Fatalf("theme was not copied: %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(root, "theme", "outputs")); !os.IsNotExist(err) {
-		t.Fatalf("theme preview outputs should not be copied into projects: %v", err)
-	}
-}
-
 func TestEnsureAgentCompatibilityMigratesOlderProject(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureAgentCompatibility(root); err != nil {

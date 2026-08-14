@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,20 +10,11 @@ import (
 	"strings"
 	"syscall"
 
-	"golang.org/x/term"
-
-	"github.com/jhleao/stamp/internal/agent"
-	"github.com/jhleao/stamp/internal/agentsetup"
-	"github.com/jhleao/stamp/internal/bundle"
 	"github.com/jhleao/stamp/internal/collab"
 	"github.com/jhleao/stamp/internal/doctor"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
-	"github.com/jhleao/stamp/internal/notion"
-	"github.com/jhleao/stamp/internal/notioncollab"
 	"github.com/jhleao/stamp/internal/project"
-	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/studio"
-	"github.com/jhleao/stamp/internal/themepreview"
 )
 
 var version = "dev"
@@ -51,42 +40,33 @@ func run(args []string) error {
 		return err
 	case "logout":
 		return stampdrive.Logout()
-	case "google-oauth":
-		return googleOAuthCommand(args[1:])
-	case "notion":
-		return notionCommand(args[1:])
-	case "space":
-		return spaceCommand(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
-	case "project":
-		return projectCommand(args[1:])
-	case "template":
-		return templateCommand(args[1:])
-	case "preview":
-		return previewCommand(args[1:])
+	case "new":
+		return newCommand(args[1:])
+	case "clone":
+		return cloneCommand(args[1:])
 	case "pull":
 		return pullCommand(args[1:])
 	case "push":
 		return pushCommand(args[1:])
 	case "studio":
 		return studioCommand(args[1:])
-	case "mcp":
-		if len(args) != 2 || args[1] != "serve" {
-			return errors.New("usage: stamp mcp serve")
+	case "skill":
+		if len(args) != 1 {
+			return errors.New("usage: stamp skill")
 		}
-		return agent.Run(context.Background(), version)
-	case "agent":
-		return agentCommand(args[1:])
+		fmt.Print(project.AgentGuide())
+		return nil
+	case "tutorial":
+		if len(args) != 1 {
+			return errors.New("usage: stamp tutorial")
+		}
+		fmt.Print(tutorial)
+		return nil
 	case "doctor":
 		return doctorCommand(args[1:])
-	case "status":
-		return statusCommand(args[1:])
-	case "pack":
-		return packCommand(args[1:])
-	case "unpack":
-		return unpackCommand(args[1:])
 	case "help", "--help", "-h":
 		usage()
 		return nil
@@ -95,476 +75,111 @@ func run(args []string) error {
 	}
 }
 
-func notionCommand(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: stamp notion <login|logout|status|pages|project>")
-	}
-	ctx := context.Background()
-	switch args[0] {
-	case "login":
-		if len(args) != 1 {
-			return errors.New("usage: stamp notion login")
-		}
-		fmt.Fprint(os.Stderr, "Notion integration token: ")
-		token, readErr := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if readErr != nil {
-			return readErr
-		}
-		if err := notion.SaveToken(string(token)); err != nil {
-			return err
-		}
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		me, err := client.Me(ctx)
-		if err != nil {
-			_ = notion.Logout()
-			return err
-		}
-		fmt.Println("Connected Notion integration", defaultString(anyString(me["name"]), "unknown"))
-		return nil
-	case "logout":
-		if len(args) != 1 {
-			return errors.New("usage: stamp notion logout")
-		}
-		return notion.Logout()
-	case "status":
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		me, err := client.Me(ctx)
-		if err != nil {
-			return err
-		}
-		fmt.Println("Notion connected")
-		fmt.Println("  integration:", defaultString(anyString(me["name"]), "unknown"))
-		return nil
-	case "pages":
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		pages, err := client.SearchPages(ctx)
-		if err != nil {
-			return err
-		}
-		for _, page := range pages {
-			fmt.Printf("%s\t%s\n", page.ID, page.URL)
-		}
-		return nil
-	case "project":
-		return notionProjectCommand(ctx, args[1:])
-	default:
-		return fmt.Errorf("unknown notion command %q", args[0])
-	}
-}
+const tutorial = `# Stamp quickstart
 
-func notionProjectCommand(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: stamp notion project <create|open|pull|push|status>")
-	}
-	client, err := notion.New()
-	if err != nil {
-		return err
-	}
-	switch args[0] {
-	case "create":
-		pos, opts, _, err := parseArgs(args[1:], []string{"parent", "dir", "name"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 {
-			return errors.New("usage: stamp notion project create --parent <page-url-or-id> [--dir <directory>] [--name <name>]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		state, err := notioncollab.Create(ctx, client, opts["parent"], root, opts["name"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Created Notion project revision %d\n%s\n", state.Revision, state.URL)
-		return nil
-	case "open":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 1 {
-			return errors.New("usage: stamp notion project open <page-url-or-id> [--dir <directory>]")
-		}
-		state, err := notioncollab.Open(ctx, client, pos[0], opts["dir"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Opened Notion revision %d\n%s\n", state.Revision, state.URL)
-		return nil
-	case "pull":
-		pos, opts, flags, err := parseArgs(args[1:], []string{"dir"}, []string{"replace"})
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 {
-			return errors.New("usage: stamp notion project pull [--dir <directory>] [--replace]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		state, err := notioncollab.Pull(ctx, client, root, flags["replace"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Pulled Notion revision %d\n", state.Revision)
-		return nil
-	case "push":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir", "message", "force-with-lease"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 {
-			return errors.New("usage: stamp notion project push [--dir <directory>] [--message <text>] [--force-with-lease <revision>]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		state, err := notioncollab.Push(ctx, client, root, opts["message"], opts["force-with-lease"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Pushed Notion revision %d\n%s\n", state.Revision, state.URL)
-		return nil
-	case "status":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 {
-			return errors.New("usage: stamp notion project status [--dir <directory>]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		status, err := notioncollab.StatusOf(ctx, client, root)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Notion revision %d\n  local changes: %v\n  remote changes: %v\n%s\n", status.State.Revision, status.LocalChanged, status.RemoteChanged, status.State.URL)
-		return nil
-	default:
-		return fmt.Errorf("unknown notion project command %q", args[0])
-	}
-}
+Stamp keeps a document project in Google Drive and opens a local Studio where
+you can edit its content, components, and visual theme.
 
-func anyString(value any) string { result, _ := value.(string); return result }
+## 1. Check this computer
 
-func googleOAuthCommand(args []string) error {
-	if len(args) != 1 {
-		return errors.New("usage: stamp google-oauth <desktop-client.json>|status|reset")
-	}
-	switch args[0] {
-	case "status":
-		info, err := stampdrive.Credentials()
-		if err != nil {
-			return err
-		}
-		fmt.Println("Google OAuth")
-		fmt.Println("  source:", info.Source)
-		fmt.Println("  location:", info.Path)
-		fmt.Println("  client:", info.ClientID)
-		fmt.Println("  scope:", info.Scope)
-		return nil
-	case "reset":
-		path, err := stampdrive.ResetConfig()
-		if err != nil {
-			return err
-		}
-		fmt.Println("Removed organization OAuth override at", path)
-		if os.Getenv("STAMP_GOOGLE_OAUTH_CONFIG") != "" {
-			fmt.Println("The STAMP_GOOGLE_OAUTH_CONFIG environment override is still active.")
-		} else {
-			fmt.Println("Stamp will use its bundled Google OAuth client. Run stamp login to connect it.")
-		}
-		return nil
-	default:
-		destination, err := stampdrive.InstallConfig(args[0])
-		if err == nil {
-			fmt.Println("Installed Google OAuth override at", destination)
-			fmt.Println("Run stamp login to connect this OAuth client.")
-		}
-		return err
-	}
-}
+    stamp doctor
 
-func agentCommand(args []string) error {
-	pos, opts, _, err := parseArgs(args, []string{"dir"}, nil)
-	if err != nil {
-		return err
-	}
-	if len(pos) != 1 || pos[0] != "setup" {
-		return errors.New("usage: stamp agent setup [--dir <directory>]")
-	}
-	result, err := agentsetup.Setup(defaultString(opts["dir"], "."))
-	if err != nil {
-		return err
-	}
-	fmt.Println("Agent setup ready")
-	fmt.Println("  instructions:", result.ClaudeFile, "-> AGENTS.md")
-	fmt.Println("  Claude MCP:", result.MCPFile)
-	fmt.Println("  endpoint:", result.Endpoint)
-	fmt.Println("Run stamp studio in this workspace before opening Claude Code.")
-	return nil
-}
+Install anything marked missing, then run the check again.
 
-func projectCommand(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: stamp project <create|list|open|rename|reconnect>")
-	}
-	switch args[0] {
-	case "list":
-		drive, err := stampdrive.New(context.Background())
-		if err != nil {
-			return err
-		}
-		items, err := drive.Projects(context.Background())
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			fmt.Printf("%s\t%s\t%s\n", item.Name, item.ID, item.WebURL)
-		}
-		return nil
-	case "open":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 1 {
-			return errors.New("usage: stamp project open <drive-url-or-id> [--dir <directory>]")
-		}
-		drive, err := stampdrive.New(context.Background())
-		if err != nil {
-			return err
-		}
-		state, err := collab.Open(context.Background(), drive, pos[0], opts["dir"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Opened Drive version %s\n", state.BaseVersion)
-		return nil
-	case "create":
-		return createProject(args[1:])
-	case "rename":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 1 {
-			return errors.New("usage: stamp project rename <name> [--dir <directory>]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		state, err := project.ReadState(root)
-		if err != nil {
-			return err
-		}
-		if state.ProjectFolderID == "" || state.FileID == "" {
-			return errors.New("project has not been pushed")
-		}
-		drive, err := stampdrive.New(context.Background())
-		if err != nil {
-			return err
-		}
-		if _, err := drive.Rename(context.Background(), state.ProjectFolderID, pos[0]); err != nil {
-			return err
-		}
-		if err := project.Rename(root, pos[0]); err != nil {
-			return err
-		}
-		state, err = collab.Push(context.Background(), drive, root, "", "rename project to "+pos[0], "")
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Renamed project to %s at Drive version %s\n", pos[0], state.BaseVersion)
-		return nil
-	case "reconnect":
-		pos, opts, _, err := parseArgs(args[1:], []string{"dir", "space", "message"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 || opts["space"] == "" {
-			return errors.New("usage: stamp project reconnect --space <id-or-url> [--dir <directory>] [--message <text>]")
-		}
-		root, err := project.FindRoot(defaultString(opts["dir"], "."))
-		if err != nil {
-			return err
-		}
-		drive, err := stampdrive.New(context.Background())
-		if err != nil {
-			return err
-		}
-		message := defaultString(opts["message"], "Reconnect project to Stamp Drive access")
-		state, recovery, err := collab.Reconnect(context.Background(), drive, root, opts["space"], message)
-		if err != nil {
-			return err
-		}
-		fmt.Println("Previous Drive project left untouched; old link saved at", recovery)
-		fmt.Printf("Connected Drive version %s\n%s\n", state.BaseVersion, state.WebURL)
-		return nil
-	default:
-		return fmt.Errorf("unknown project command %q", args[0])
-	}
-}
+## 2. Connect Google Drive
 
-func createProject(args []string) error {
-	pos, opts, _, err := parseArgs(args, []string{"name", "template", "space"}, nil)
+    stamp login
+
+Your browser opens. Sign in and allow Stamp to manage the Drive files it creates.
+
+## 3. Create your first project
+
+    stamp new first-project --name "First project"
+    cd first-project
+
+Stamp creates the local folder and its connected Google Drive project together.
+The folder contains readable Markdown content and its complete visual theme.
+
+## 4. Open Studio
+
+    stamp studio
+
+Edit Content for the words. Edit Templates for TSX components, Tailwind, and
+assets. Save and inspect the preview before sharing.
+
+## Everyday collaboration
+
+    stamp pull
+    # Edit in Studio or ask an agent to edit this folder.
+    stamp push --message "Describe what changed"
+
+Pull before editing. Push only when the version is ready for other people.
+Stamp refuses to overwrite a newer Drive version without an explicit review.
+
+## Add a colleague
+
+Share the project folder with them in Google Drive. After they install Stamp and
+run ` + "`stamp login`" + `:
+
+    stamp clone first-project
+    # Choose the shared project in Google Drive.
+    cd first-project
+    stamp studio
+
+For coding agents, run ` + "`stamp skill`" + ` or point the agent at the project folder;
+new projects already contain AGENTS.md and CLAUDE.md instructions.
+`
+
+func newCommand(args []string) error {
+	pos, opts, _, err := parseArgs(args, []string{"name"}, nil)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return errors.New("usage: stamp project create <directory> [--name <name>] [--template <theme-directory>] [--space <id-or-url>]")
+		return errors.New("usage: stamp new <directory> [--name <name>]")
 	}
 	dir, err := filepath.Abs(pos[0])
 	if err != nil {
 		return err
 	}
-	p, err := project.CreateWithTheme(dir, opts["name"], opts["template"])
+	manifest, err := project.Create(dir, opts["name"])
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Created %s at %s\n", p.Name, dir)
-	if _, err := agentsetup.Setup(dir); err != nil {
-		return fmt.Errorf("prepare agent integration: %w", err)
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return fmt.Errorf("created %s locally, but could not connect Google Drive: %w", dir, err)
 	}
-	if opts["space"] != "" {
-		drive, err := stampdrive.New(context.Background())
-		if err != nil {
-			return fmt.Errorf("project was created locally but could not connect to Drive: %w", err)
-		}
-		state, err := collab.Push(context.Background(), drive, dir, opts["space"], "Create project", "")
-		if err != nil {
-			return fmt.Errorf("project was created locally but could not connect to Drive: %w", err)
-		}
-		fmt.Printf("Connected Drive version %s\n%s\n", state.BaseVersion, state.WebURL)
-		fmt.Println("Ready for stamp studio --dir", dir)
-	} else {
-		fmt.Println("Local project only. Connect it with stamp push --dir", dir, "--space <space-id-or-url> before opening Studio.")
+	state, err := collab.Push(context.Background(), drive, dir, "Create project", "")
+	if err != nil {
+		return fmt.Errorf("created %s locally, but could not create its Drive project: %w", dir, err)
 	}
+	fmt.Printf("Created %s\n%s\n%s\n", manifest.Name, dir, state.WebURL)
 	return nil
 }
 
-func templateCommand(args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: stamp template <create|preview> <directory>")
+func cloneCommand(args []string) error {
+	if len(args) > 1 {
+		return errors.New("usage: stamp clone [directory]")
 	}
-	if args[0] == "preview" {
-		results, err := themepreview.All(args[1])
-		for _, result := range results {
-			fmt.Printf("%s -> %s\n", result.Source, result.Output)
-		}
-		return err
+	destination := ""
+	if len(args) == 1 {
+		destination = args[0]
 	}
-	if args[0] != "create" {
-		return fmt.Errorf("unknown template command %q", args[0])
-	}
-	dir, err := filepath.Abs(args[1])
+	id, err := stampdrive.PickFolder(context.Background())
 	if err != nil {
 		return err
-	}
-	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) > 0 {
-		return fmt.Errorf("%s is not empty", dir)
-	} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-		return readErr
-	}
-	if err := project.WriteStarterTheme(dir); err != nil {
-		return err
-	}
-	fmt.Printf("Created theme at %s\n", dir)
-	fmt.Println("Edit examples, components, and tailwind.css; verify with stamp template preview", dir)
-	return nil
-}
-
-func spaceCommand(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: stamp space <list|create|pick|init|rename>")
 	}
 	drive, err := stampdrive.New(context.Background())
 	if err != nil {
 		return err
 	}
-	switch args[0] {
-	case "create":
-		if len(args) != 2 {
-			return errors.New("usage: stamp space create <name>")
-		}
-		item, err := drive.CreateSpace(context.Background(), args[1])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Created %s\n%s\n", item.Name, item.WebURL)
-		return nil
-	case "rename":
-		if len(args) != 3 {
-			return errors.New("usage: stamp space rename <drive-url-or-id> <name>")
-		}
-		item, err := drive.Rename(context.Background(), stampdrive.ID(args[1]), args[2])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Renamed Space to %s\n%s\n", item.Name, item.WebURL)
-		return nil
-	case "list":
-		items, err := drive.Spaces(context.Background())
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			fmt.Printf("%s\t%s\t%s\n", item.Name, item.ID, item.WebURL)
-		}
-		return nil
-	case "init":
-		pos, opts, _, err := parseArgs(args[1:], []string{"name"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 1 {
-			return errors.New("usage: stamp space init <drive-folder-url-or-id> [--name <name>]")
-		}
-		item, err := drive.InitSpace(context.Background(), pos[0], opts["name"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Initialized %s\n%s\n", item.Name, item.WebURL)
-		return nil
-	case "pick":
-		pos, opts, _, err := parseArgs(args[1:], []string{"name"}, nil)
-		if err != nil {
-			return err
-		}
-		if len(pos) != 0 {
-			return errors.New("usage: stamp space pick [--name <name>]")
-		}
-		id, err := stampdrive.PickFolder(context.Background())
-		if err != nil {
-			return err
-		}
-		item, err := drive.InitSpace(context.Background(), id, opts["name"])
-		if err != nil {
-			return fmt.Errorf("connect selected Drive folder: %w", err)
-		}
-		fmt.Printf("Connected %s\n%s\n", item.Name, item.WebURL)
-		return nil
-	default:
-		return fmt.Errorf("unknown space command %q", args[0])
+	state, err := collab.Open(context.Background(), drive, id, destination)
+	if err != nil {
+		return err
 	}
+	fmt.Printf("Cloned Drive version %s\n", state.BaseVersion)
+	return nil
 }
 
 func pullCommand(args []string) error {
@@ -589,20 +204,6 @@ func pullCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	if state, _ := notioncollab.ReadState(root); state.PageID != "" {
-		if mode == collab.PullIncoming {
-			return errors.New("Notion pull supports safe pull and --replace; --incoming is not available")
-		}
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		state, err := notioncollab.Pull(context.Background(), client, root, mode == collab.PullReplace)
-		if err == nil {
-			fmt.Printf("Pulled Notion revision %d\n", state.Revision)
-		}
-		return err
-	}
 	drive, err := stampdrive.New(context.Background())
 	if err != nil {
 		return err
@@ -615,34 +216,22 @@ func pullCommand(args []string) error {
 }
 
 func pushCommand(args []string) error {
-	pos, opts, _, err := parseArgs(args, []string{"dir", "space", "message", "force-with-lease"}, nil)
+	pos, opts, _, err := parseArgs(args, []string{"dir", "message", "force-with-lease"}, nil)
 	if err != nil {
 		return err
 	}
 	if len(pos) != 0 {
-		return errors.New("usage: stamp push [--dir <directory>] [--space <id>] [--message <text>] [--force-with-lease <version>]")
+		return errors.New("usage: stamp push [--dir <directory>] [--message <text>] [--force-with-lease <version>]")
 	}
 	root, err := project.FindRoot(defaultString(opts["dir"], "."))
 	if err != nil {
 		return err
 	}
-	if state, _ := notioncollab.ReadState(root); state.PageID != "" {
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		state, err := notioncollab.Push(context.Background(), client, root, opts["message"], opts["force-with-lease"])
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Pushed Notion revision %d\n%s\n", state.Revision, state.URL)
-		return nil
-	}
 	drive, err := stampdrive.New(context.Background())
 	if err != nil {
 		return err
 	}
-	state, err := collab.Push(context.Background(), drive, root, opts["space"], opts["message"], opts["force-with-lease"])
+	state, err := collab.Push(context.Background(), drive, root, opts["message"], opts["force-with-lease"])
 	if err != nil {
 		return err
 	}
@@ -685,114 +274,19 @@ func doctorCommand(args []string) error {
 	return nil
 }
 
-func previewCommand(args []string) error {
-	fs := flag.NewFlagSet("preview", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "project directory")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	root, err := project.FindRoot(*dir)
-	if err != nil {
-		return err
-	}
-	results, err := render.All(root)
-	for _, result := range results {
-		fmt.Printf("%s -> %s\n", result.Source, result.Output)
-	}
-	return err
-}
-
-func statusCommand(args []string) error {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "project directory")
-	jsonOutput := fs.Bool("json", false, "print JSON")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	root, err := project.FindRoot(*dir)
-	if err != nil {
-		return err
-	}
-	if state, _ := notioncollab.ReadState(root); state.PageID != "" {
-		client, err := notion.New()
-		if err != nil {
-			return err
-		}
-		status, err := notioncollab.StatusOf(context.Background(), client, root)
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(status)
-		}
-		fmt.Printf("Notion revision %d\n", status.State.Revision)
-		fmt.Printf("  local changes: %v\n", status.LocalChanged)
-		fmt.Printf("  remote changes: %v\n", status.RemoteChanged)
-		fmt.Printf("  link: %s\n", status.State.URL)
-		return nil
-	}
-	status, err := project.Status(root)
-	if err != nil {
-		return err
-	}
-	if *jsonOutput {
-		return json.NewEncoder(os.Stdout).Encode(status)
-	}
-	fmt.Printf("%s\n", status.Name)
-	fmt.Printf("  files: %d\n", status.Files)
-	fmt.Printf("  lease: %s\n", status.Lease)
-	fmt.Printf("  local changes: %v\n", status.Dirty)
-	return nil
-}
-
-func packCommand(args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: stamp pack <project-directory> <archive.stamp>")
-	}
-	return bundle.PackFile(args[0], args[1])
-}
-
-func unpackCommand(args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: stamp unpack <archive.stamp> <directory>")
-	}
-	return bundle.UnpackFile(args[0], args[1])
-}
-
 func usage() {
 	fmt.Print(`Stamp makes document projects with people and agents.
 
 Usage:
   stamp login | logout
-  stamp google-oauth <desktop-client.json>|status|reset
-  stamp notion login | logout | status | pages
-  stamp notion project create --parent <page-url-or-id> [--dir <directory>] [--name <name>]
-  stamp notion project open <page-url-or-id> [--dir <directory>]
-  stamp notion project pull [--dir <directory>] [--replace]
-  stamp notion project push [--dir <directory>] [--message <text>] [--force-with-lease <revision>]
-  stamp notion project status [--dir <directory>]
-  stamp space init <drive-folder-url-or-id> [--name <name>]
-  stamp space pick [--name <name>]
-  stamp space create <name>
-  stamp space rename <drive-url-or-id> <name>
-  stamp space list
-	stamp template create <directory>
-	stamp template preview <directory>
-  stamp project create <directory> [--name <name>] [--template <theme-directory>] [--space <id-or-url>]
-  stamp project list
-  stamp project open <drive-url-or-id> [--dir <directory>]
-  stamp project rename <name> [--dir <directory>]
-  stamp project reconnect --space <id-or-url> [--dir <directory>] [--message <text>]
+  stamp new <directory> [--name <name>]
+  stamp clone [directory]
   stamp pull [--incoming|--replace]
-  stamp push [--space <id>] [--message <text>] [--force-with-lease <version>]
+  stamp push [--message <text>] [--force-with-lease <version>]
   stamp studio [--dir <directory>] [--no-open]
-  stamp agent setup [--dir <directory>]
-  stamp mcp serve
+  stamp tutorial
+  stamp skill
   stamp doctor
-  stamp preview [--dir <directory>]
-  stamp status [--dir <directory>] [--json]
-  stamp pack <project-directory> <archive.stamp>
-  stamp unpack <archive.stamp> <directory>
   stamp version
 `)
 }

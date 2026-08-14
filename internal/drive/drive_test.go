@@ -78,9 +78,9 @@ func TestOAuthConfigUsesDriveFileScope(t *testing.T) {
 	}
 }
 
-func TestPickerHTMLContainsFolderOnlyFlow(t *testing.T) {
+func TestPickerSelectsOneProjectFolder(t *testing.T) {
 	html := pickerHTML("token-value", "key-value")
-	for _, want := range []string{"ViewId.FOLDERS", "setSelectFolderEnabled(true)", "token-value", "key-value"} {
+	for _, want := range []string{"ViewId.FOLDERS", "setSelectFolderEnabled(true)", "token-value", "key-value", "Clone a Stamp project"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("picker HTML missing %q", want)
 		}

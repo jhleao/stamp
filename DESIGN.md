@@ -28,7 +28,6 @@ It runs on macOS and treats Google Drive as the collaboration surface.
 stamp project open <drive-url>
 stamp pull
 stamp studio
-stamp preview
 stamp push --message "update the board pack"
 ```
 
@@ -99,8 +98,8 @@ implements a spreadsheet layout or formula engine.
 
 `stamp studio` binds a tokenized server to `127.0.0.1`. Its Preact, Signals,
 Vite, and Tailwind interface provides a file tree, a restrained Monaco editor,
-preview, diagnostics, conflicts, pull, and push. Agents remain external through
-MCP; Studio does not contain chat, a design canvas, or collaboration primitives.
+preview, diagnostics, conflicts, pull, and push. Agents remain external and use
+the ordinary CLI; Studio does not contain chat or collaboration primitives.
 
 ## Theme authoring
 
@@ -131,20 +130,8 @@ raw TSX is never the canonical collaboration format.
 
 ## Agent surface
 
-Keep MCP to the ordinary workflow:
-
-```text
-spaces_list
-projects_list
-project_create
-project_open
-project_status
-project_preview
-project_pull
-project_push
-project_drive_link
-doctor
-```
+`stamp skill` prints the canonical project instructions. Agents edit ordinary
+files and call the same CLI as people; there is no parallel agent protocol.
 
 ## Complexity budget
 

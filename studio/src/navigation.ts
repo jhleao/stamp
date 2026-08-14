@@ -44,7 +44,7 @@ const groupRoots: Record<string, string> = {
 
 function visible(file: FileItem, activeSection: FileSection) {
   if (file.hidden || file.section !== activeSection || file.path.startsWith("outputs/")) return false;
-  return !["AGENTS.md", "CLAUDE.md", ".mcp.json", "stamp.yaml"].includes(file.path);
+  return !["AGENTS.md", "CLAUDE.md", "stamp.yaml"].includes(file.path);
 }
 
 export function visibleFiles(files: FileItem[], activeSection: FileSection) {

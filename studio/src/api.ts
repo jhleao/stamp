@@ -21,10 +21,10 @@ export const api = {
     headers: { "Content-Type": "text/plain" },
     body,
   }),
-  push: (space: string, message: string, forceWithLease = "") => request<{ message: string }>("api/push", {
+  push: (message: string, forceWithLease = "") => request<{ message: string }>("api/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ space, message, forceWithLease }),
+    body: JSON.stringify({ message, forceWithLease }),
   }),
   pull: () => request<{ message: string }>("api/pull", {
     method: "POST",

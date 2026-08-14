@@ -136,7 +136,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		return "", err
 	}
 	if state.FileID == "" {
-		return "", errors.New("project has no Drive remote; push it to a space first")
+		return "", errors.New("project has no Drive remote; create it with stamp new")
 	}
 	remote, err := drive.Get(ctx, state.FileID)
 	if err != nil {
@@ -196,8 +196,8 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 	return "Pulled Drive version " + remote.Version, nil
 }
 
-func Push(ctx context.Context, drive Drive, root, spaceID, message, forceLease string) (project.RemoteState, error) {
-	return push(ctx, drive, root, spaceID, message, forceLease, renderProject)
+func Push(ctx context.Context, drive Drive, root, message, forceLease string) (project.RemoteState, error) {
+	return push(ctx, drive, root, "root", message, forceLease, renderProject)
 }
 
 func renderProject(root string) error {
@@ -205,7 +205,7 @@ func renderProject(root string) error {
 	return err
 }
 
-func push(ctx context.Context, drive Drive, root, spaceID, message, forceLease string, renderWorkspace func(string) error) (project.RemoteState, error) {
+func push(ctx context.Context, drive Drive, root, parentID, message, forceLease string, renderWorkspace func(string) error) (project.RemoteState, error) {
 	manifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
@@ -219,10 +219,7 @@ func push(ctx context.Context, drive Drive, root, spaceID, message, forceLease s
 	}
 	firstPush := state.FileID == ""
 	if firstPush {
-		if spaceID == "" {
-			return project.RemoteState{}, errors.New("first push needs --space <space-id-or-url>")
-		}
-		if err := createRemote(ctx, drive, manifest, stampdrive.ID(spaceID), &state); err != nil {
+		if err := createRemote(ctx, drive, manifest, stampdrive.ID(parentID), &state); err != nil {
 			return project.RemoteState{}, err
 		}
 	}
@@ -270,50 +267,6 @@ func push(ctx context.Context, drive Drive, root, spaceID, message, forceLease s
 	return state, nil
 }
 
-// Reconnect preserves the previous remote state as local recovery metadata and
-// publishes the workspace as a new Drive project. The old Drive project is not
-// modified. This is primarily useful when changing OAuth applications because
-// drive.file grants do not transfer between client IDs.
-func Reconnect(ctx context.Context, drive Drive, root, spaceID, message string) (project.RemoteState, string, error) {
-	return reconnect(ctx, drive, root, spaceID, message, renderProject)
-}
-
-func reconnect(ctx context.Context, drive Drive, root, spaceID, message string, renderWorkspace func(string) error) (project.RemoteState, string, error) {
-	if strings.TrimSpace(spaceID) == "" {
-		return project.RemoteState{}, "", errors.New("reconnect needs --space <space-id-or-url>")
-	}
-	previous, err := project.ReadState(root)
-	if err != nil {
-		return project.RemoteState{}, "", err
-	}
-	if previous.FileID == "" {
-		return project.RemoteState{}, "", errors.New("project is local-only; use stamp push --space instead")
-	}
-	recoveryDir := filepath.Join(root, ".stamp", "recovery")
-	if err := os.MkdirAll(recoveryDir, 0o700); err != nil {
-		return project.RemoteState{}, "", err
-	}
-	recovery := filepath.Join(recoveryDir, "drive-link-"+time.Now().UTC().Format("20060102T150405Z")+".json")
-	data, err := json.MarshalIndent(previous, "", "  ")
-	if err != nil {
-		return project.RemoteState{}, "", err
-	}
-	if err := os.WriteFile(recovery, append(data, '\n'), 0o600); err != nil {
-		return project.RemoteState{}, "", err
-	}
-	if err := project.WriteState(root, project.RemoteState{}); err != nil {
-		return project.RemoteState{}, recovery, err
-	}
-	state, err := push(ctx, drive, root, spaceID, message, "", renderWorkspace)
-	if err != nil {
-		if restoreErr := project.WriteState(root, previous); restoreErr != nil {
-			return project.RemoteState{}, recovery, fmt.Errorf("reconnect failed: %v; restore previous Drive link: %w", err, restoreErr)
-		}
-		return project.RemoteState{}, recovery, err
-	}
-	return state, recovery, nil
-}
-
 func checkLease(local, remote, forced string) error {
 	if local != "" && remote != local && forced != remote {
 		return fmt.Errorf("push refused: workspace lease is %s but Drive is %s; pull first, or use --force-with-lease %s after reviewing it", local, remote, remote)
@@ -324,12 +277,8 @@ func checkLease(local, remote, forced string) error {
 	return nil
 }
 
-func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, spaceID string, state *project.RemoteState) error {
-	projects, err := drive.EnsureFolder(ctx, spaceID, "Projects", map[string]string{"stamp_kind": "projects"})
-	if err != nil {
-		return err
-	}
-	folder, err := drive.EnsureFolder(ctx, projects.ID, manifest.Name, map[string]string{"stamp_kind": "project", "stamp_id": manifest.ID})
+func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, parentID string, state *project.RemoteState) error {
+	folder, err := drive.EnsureFolder(ctx, parentID, manifest.Name, map[string]string{"stamp_kind": "project", "stamp_id": manifest.ID})
 	if err != nil {
 		return err
 	}

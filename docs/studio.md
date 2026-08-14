@@ -7,14 +7,10 @@ cd board-pack
 stamp studio
 ```
 
-Studio intentionally refuses local-only projects. Connect the project first
-with `stamp project create ... --space <space>` or an initial `stamp push
---space <space>`. Opening an existing Drive project is already connected. This
-keeps account selection, Picker authorization, and first publication in the CLI.
+Studio intentionally opens only connected projects. Create one with `stamp new`
+or check out a shared one with `stamp clone` first.
 
-It opens a capability URL on `127.0.0.1:57183`. The same process exposes a
-project-bound Streamable HTTP MCP endpoint at `http://127.0.0.1:57183/mcp`.
-The project never leaves the Mac
+It opens a capability URL on `127.0.0.1:57183`. The project never leaves the Mac
 unless the user presses Push. Edits made by an agent or another local editor
 appear automatically when the editor is idle. Studio never replaces an active
 draft; it shows **File changed** and lets the user reload it deliberately.
@@ -52,5 +48,5 @@ change came from Studio, a coding agent, or the CLI preview flow. Generated
 `page.css` and `deck.css` remain hidden and should never be hand-edited.
 
 Studio is not a WYSIWYG layout tool, AI chat client, or cloud collaboration
-server. Its local MCP endpoint lets an agent operate the current workspace;
+server.
 Pull and Push remain the collaboration boundary.

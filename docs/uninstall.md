@@ -45,23 +45,17 @@ command -v stamp || echo 'Stamp is not installed'
 
 If `command -v stamp` reports another path, remove the binary using the package manager or installation method that owns that path.
 
-## 4. Remove project agent integration (optional)
+## 4. Remove project agent instructions (optional)
 
-`stamp agent setup` adds a `stamp` entry to each project's `.mcp.json` and creates `CLAUDE.md` as a symlink to `AGENTS.md`. These files are project-local and are not removed automatically.
-
-For each project you no longer want connected:
-
-1. Remove only the `mcpServers.stamp` object from `.mcp.json`. Preserve other MCP servers. Delete `.mcp.json` only if it is otherwise empty.
-2. Remove `CLAUDE.md` only if it is still a symlink to `AGENTS.md`.
-3. Keep `AGENTS.md` if its project instructions are still useful.
+Projects contain `AGENTS.md` and a `CLAUDE.md` symlink so coding agents discover
+their workflow without setup. They are project-local and safe to keep. To remove
+the Claude compatibility link, verify its target first:
 
 Check the link before removing it:
 
 ```sh
 test "$(readlink CLAUDE.md)" = 'AGENTS.md' && rm CLAUDE.md
 ```
-
-Codex and Claude Code may cache an approved project MCP server. Removing the project entry prevents it from being registered the next time that project opens.
 
 ## 5. Remove source and dependencies (optional)
 

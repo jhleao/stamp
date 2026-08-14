@@ -16,18 +16,17 @@ import (
 
 const pickerAppID = "174648149574"
 
-// DefaultPickerAPIKey is public browser configuration, not a secret. The
-// environment override keeps development and organization-owned projects
-// possible without changing Stamp's first-party default.
+// DefaultPickerAPIKey is public browser configuration, not a secret.
 var DefaultPickerAPIKey = "REMOVED_GOOGLE_PICKER_API_KEY"
 
+// PickFolder asks the signed-in user to select a shared Stamp project folder.
 func PickFolder(ctx context.Context) (string, error) {
 	developerKey := strings.TrimSpace(os.Getenv("STAMP_GOOGLE_PICKER_API_KEY"))
 	if developerKey == "" {
 		developerKey = strings.TrimSpace(DefaultPickerAPIKey)
 	}
 	if developerKey == "" {
-		return "", errors.New("Google Picker needs the Stamp browser API key; set STAMP_GOOGLE_PICKER_API_KEY for this development build")
+		return "", errors.New("Google Picker is not configured in this build")
 	}
 	config, clientID, err := oauthConfig()
 	if err != nil {
@@ -105,13 +104,13 @@ func pickerHTML(accessToken, developerKey string) string {
 	keyJSON, _ := json.Marshal(developerKey)
 	return `<!doctype html>
 <meta charset="utf-8">
-<title>Choose a Stamp Space</title>
+<title>Clone a Stamp project</title>
 <style>
   :root { color-scheme: dark; font: 15px system-ui, sans-serif; background:#111; color:#ddd }
   body { margin:0; min-height:100vh; display:grid; place-items:center }
   p { color:#888 }
 </style>
-<main><strong>Opening Google Drive…</strong><p>Choose one folder for Stamp.</p></main>
+<main><strong>Opening Google Drive…</strong><p>Choose the shared Stamp project.</p></main>
 <script src="https://apis.google.com/js/api.js"></script>
 <script>
 const token = ` + string(tokenJSON) + `;
@@ -126,7 +125,7 @@ function openPicker() {
     .setMode(google.picker.DocsViewMode.LIST);
   const picker = new google.picker.PickerBuilder()
     .addView(view).setOAuthToken(token).setDeveloperKey(developerKey)
-    .setAppId('` + pickerAppID + `').setTitle('Choose a Stamp Space')
+    .setAppId('` + pickerAppID + `').setTitle('Clone a Stamp project')
     .setCallback(data => {
       if (data.action === google.picker.Action.PICKED) finish('/picked', {id:data.docs[0].id});
       if (data.action === google.picker.Action.CANCEL) finish('/cancel');

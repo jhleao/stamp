@@ -18,17 +18,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/jhleao/stamp/internal/agent"
 	"github.com/jhleao/stamp/internal/bundle"
 	"github.com/jhleao/stamp/internal/collab"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
-	"github.com/jhleao/stamp/internal/notion"
-	"github.com/jhleao/stamp/internal/notioncollab"
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/theme"
@@ -36,6 +32,8 @@ import (
 
 //go:embed static/*
 var static embed.FS
+
+const studioAddress = "127.0.0.1:57183"
 
 type Server struct {
 	root        string
@@ -64,7 +62,6 @@ type fileItem struct {
 
 type pushRequest struct {
 	Message string `json:"message"`
-	Space   string `json:"space"`
 	Force   string `json:"forceWithLease"`
 }
 
@@ -107,15 +104,15 @@ func Start(ctx context.Context, root string, openBrowser bool, version string) e
 		return err
 	}
 	if !connected {
-		return errors.New("Studio opens only connected projects; run stamp push --space <space-id-or-url> first, or stamp project open <drive-url-or-id>")
+		return errors.New("Studio opens only connected projects; create one with stamp new or check one out with stamp clone")
 	}
 	if err := theme.CompileIfNeeded(ctx, root); err != nil {
 		return err
 	}
 	server := &Server{root: root, token: token(), clients: map[chan string]struct{}{}, version: version}
-	listener, err := net.Listen("tcp", agent.StudioAddress)
+	listener, err := net.Listen("tcp", studioAddress)
 	if err != nil {
-		return fmt.Errorf("Studio needs %s for its stable app and agent endpoint; close the other Studio process and try again: %w", agent.StudioAddress, err)
+		return fmt.Errorf("Studio needs %s; close the other Studio process and try again: %w", studioAddress, err)
 	}
 	server.host = listener.Addr().String()
 	server.origin = "http://" + server.host
@@ -129,7 +126,6 @@ func Start(ctx context.Context, root string, openBrowser bool, version string) e
 	}()
 	url := server.origin + "/" + server.token + "/"
 	fmt.Println("Studio:", url)
-	fmt.Println("Agents:", agent.StudioEndpoint)
 	if openBrowser {
 		_ = exec.Command("open", url).Start()
 	}
@@ -144,10 +140,6 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	base := "/" + s.token
 	staticFS, _ := fs.Sub(static, "static")
-	mcpHandler := agent.HTTPHandler(s.version, s.root)
-	for _, method := range []string{"GET", "POST", "DELETE"} {
-		mux.Handle(method+" /mcp", mcpHandler)
-	}
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, base+"/", http.StatusFound) })
 	mux.HandleFunc("GET "+base+"/", s.staticFile("static/index.html", "text/html; charset=utf-8"))
 	mux.Handle("GET "+base+"/assets/", http.StripPrefix(base+"/", http.FileServer(http.FS(staticFS))))
@@ -203,10 +195,6 @@ func (s *Server) project(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	state, _ := project.ReadState(s.root)
-	remoteState := any(state)
-	if notionState, _ := notioncollab.ReadState(s.root); notionState.PageID != "" {
-		remoteState = map[string]any{"webUrl": notionState.URL, "baseVersion": strconv.Itoa(notionState.Revision), "provider": "notion"}
-	}
 	status, _ := project.Status(s.root)
 	files, err := s.files()
 	if err != nil {
@@ -218,7 +206,7 @@ func (s *Server) project(w http.ResponseWriter, _ *http.Request) {
 		s.writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	s.writeJSON(w, map[string]any{"project": manifest, "state": remoteState, "status": status, "files": files, "tailwindClasses": s.tailwindClasses(), "workspacePath": workspacePath})
+	s.writeJSON(w, map[string]any{"project": manifest, "state": state, "status": status, "files": files, "tailwindClasses": s.tailwindClasses(), "workspacePath": workspacePath})
 }
 
 var classAttribute = regexp.MustCompile(`(?i)\bclass(?:name)?\s*=\s*["']([^"']+)["']`)
@@ -267,28 +255,6 @@ func (s *Server) tailwindClasses() []string {
 }
 
 func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
-	if notionState, _ := notioncollab.ReadState(s.root); notionState.PageID != "" {
-		client, err := notion.New()
-		if err != nil {
-			s.writeJSON(w, syncStatus{State: "unavailable", Provider: "notion", DriveName: "Notion", DriveURL: notionState.URL, Message: err.Error()})
-			return
-		}
-		status, err := notioncollab.StatusOf(r.Context(), client, s.root)
-		if err != nil {
-			s.writeJSON(w, syncStatus{State: "unavailable", Provider: "notion", DriveName: "Notion", DriveURL: notionState.URL, Message: err.Error()})
-			return
-		}
-		state := "up-to-date"
-		if status.LocalChanged && status.RemoteChanged {
-			state = "diverged"
-		} else if status.LocalChanged {
-			state = "local-ahead"
-		} else if status.RemoteChanged {
-			state = "remote-ahead"
-		}
-		s.writeJSON(w, syncStatus{State: state, Provider: "notion", LocalChanged: status.LocalChanged, RemoteChanged: status.RemoteChanged, DriveName: "Notion", DriveURL: notionState.URL, BaseVersion: strconv.Itoa(notionState.Revision)})
-		return
-	}
 	state, err := project.ReadState(s.root)
 	if err != nil {
 		s.writeError(w, err, http.StatusInternalServerError)
@@ -344,10 +310,6 @@ func unavailableSync(state project.RemoteState, status project.ProjectStatus, er
 }
 
 func (s *Server) syncDetails(w http.ResponseWriter, r *http.Request) {
-	if notionState, _ := notioncollab.ReadState(s.root); notionState.PageID != "" {
-		s.writeJSON(w, syncDetails{Local: []fileChange{}, Remote: []fileChange{}})
-		return
-	}
 	state, err := project.ReadState(s.root)
 	if err != nil {
 		s.writeError(w, err, http.StatusInternalServerError)
@@ -541,20 +503,6 @@ func (s *Server) pull(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = collab.PullSafe
 	}
-	if notionState, _ := notioncollab.ReadState(s.root); notionState.PageID != "" {
-		client, err := notion.New()
-		if err == nil {
-			var state notioncollab.State
-			state, err = notioncollab.Pull(r.Context(), client, s.root, mode == collab.PullReplace)
-			if err == nil {
-				s.broadcast("change")
-				s.writeJSON(w, map[string]any{"ok": true, "message": fmt.Sprintf("Pulled Notion revision %d", state.Revision)})
-				return
-			}
-		}
-		s.writeError(w, err, http.StatusConflict)
-		return
-	}
 	drive, err := stampdrive.New(r.Context())
 	if err == nil {
 		var message string
@@ -574,27 +522,12 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	if notionState, _ := notioncollab.ReadState(s.root); notionState.PageID != "" {
-		client, err := notion.New()
-		if err != nil {
-			s.writeError(w, err, http.StatusUnauthorized)
-			return
-		}
-		state, err := notioncollab.Push(r.Context(), client, s.root, request.Message, request.Force)
-		if err != nil {
-			s.writeError(w, err, http.StatusConflict)
-			return
-		}
-		s.broadcast("change")
-		s.writeJSON(w, map[string]any{"ok": true, "message": fmt.Sprintf("Pushed Notion revision %d", state.Revision), "state": state})
-		return
-	}
 	drive, err := stampdrive.New(r.Context())
 	if err != nil {
 		s.writeError(w, err, http.StatusUnauthorized)
 		return
 	}
-	state, err := collab.Push(r.Context(), drive, s.root, request.Space, request.Message, request.Force)
+	state, err := collab.Push(r.Context(), drive, s.root, request.Message, request.Force)
 	if err != nil {
 		s.writeError(w, err, http.StatusConflict)
 		return

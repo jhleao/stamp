@@ -24,7 +24,7 @@ export interface ProjectSnapshot {
 
 export interface SyncSnapshot {
   state: "local-only" | "local-ahead" | "remote-ahead" | "diverged" | "up-to-date" | "unavailable";
-  provider?: "drive" | "notion";
+  provider?: "drive";
   localChanged: boolean;
   remoteChanged: boolean;
   driveName?: string;

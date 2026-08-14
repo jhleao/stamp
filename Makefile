@@ -5,7 +5,7 @@ ifneq ($(strip $(PICKER_API_KEY)),)
 GO_LDFLAGS += -X github.com/jhleao/stamp/internal/drive.DefaultPickerAPIKey=$(PICKER_API_KEY)
 endif
 
-.PHONY: frontend build test smoke stress install
+.PHONY: frontend build test smoke install
 
 frontend:
 	npm run build:studio
@@ -20,10 +20,6 @@ test:
 
 smoke: build
 	./scripts/smoke.sh
-
-stress: build
-	npm run theme:stress
-	./bin/stamp preview --dir examples/stress-showcase
 
 install: build
 	install -m 0755 bin/stamp /usr/local/bin/stamp

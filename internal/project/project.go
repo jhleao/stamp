@@ -43,10 +43,6 @@ type ProjectStatus struct {
 }
 
 func Create(root, name string) (Manifest, error) {
-	return CreateWithTheme(root, name, "")
-}
-
-func CreateWithTheme(root, name, themeDir string) (Manifest, error) {
 	if name == "" {
 		name = filepath.Base(root)
 	}
@@ -76,14 +72,8 @@ func CreateWithTheme(root, name, themeDir string) (Manifest, error) {
 	if err := EnsureAgentCompatibility(root); err != nil {
 		return Manifest{}, err
 	}
-	if themeDir != "" {
-		if err := copyTheme(themeDir, filepath.Join(root, "theme")); err != nil {
-			return Manifest{}, err
-		}
-	} else {
-		if err := WriteStarterTheme(filepath.Join(root, "theme")); err != nil {
-			return Manifest{}, err
-		}
+	if err := writeStarterTheme(filepath.Join(root, "theme")); err != nil {
+		return Manifest{}, err
 	}
 	for name, contents := range map[string]string{
 		"documents/start-here.page.md": starterPage,
@@ -138,7 +128,7 @@ func EnsureAgentCompatibility(root string) error {
 	return os.Symlink("AGENTS.md", claudePath)
 }
 
-func WriteStarterTheme(root string) error {
+func writeStarterTheme(root string) error {
 	for _, dir := range []string{"components", "examples"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return err
@@ -183,40 +173,6 @@ func WriteStarterTheme(root string) error {
 	return nil
 }
 
-func copyTheme(source, destination string) error {
-	source, err := filepath.Abs(source)
-	if err != nil {
-		return err
-	}
-	if info, err := os.Stat(filepath.Join(source, "page.html.tmpl")); err != nil || info.IsDir() {
-		return fmt.Errorf("%s is not a Stamp theme (page.html.tmpl is missing)", source)
-	}
-	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, rel)
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("theme may not contain symlink %s", rel)
-		}
-		if entry.IsDir() {
-			if rel == "outputs" || rel == ".stamp" {
-				return filepath.SkipDir
-			}
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
-}
-
 func Load(root string) (Manifest, error) {
 	data, err := os.ReadFile(filepath.Join(root, ManifestName))
 	if err != nil {
@@ -230,18 +186,6 @@ func Load(root string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("%s needs id and name", ManifestName)
 	}
 	return manifest, nil
-}
-
-func Rename(root, name string) error {
-	manifest, err := Load(root)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(name) == "" {
-		return errors.New("project name is required")
-	}
-	manifest.Name = name
-	return writeYAML(filepath.Join(root, ManifestName), manifest)
 }
 
 func FindRoot(start string) (string, error) {
@@ -296,24 +240,7 @@ func Connected(root string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if state.FileID != "" && state.ProjectFolderID != "" && state.CurrentFolderID != "" && state.BaseVersion != "" {
-		return true, nil
-	}
-	data, err := os.ReadFile(filepath.Join(root, ".stamp", "notion.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var notionState struct {
-		PageID   string `json:"pageId"`
-		Revision int    `json:"revision"`
-	}
-	if err := json.Unmarshal(data, &notionState); err != nil {
-		return false, fmt.Errorf("read Notion project state: %w", err)
-	}
-	return notionState.PageID != "" && notionState.Revision > 0, nil
+	return state.FileID != "" && state.ProjectFolderID != "" && state.CurrentFolderID != "" && state.BaseVersion != "", nil
 }
 
 func FileHashes(root string) (map[string]string, error) {
@@ -496,16 +423,17 @@ This workspace is a shared document pack. Keep the loop small:
 
 1. Run ` + "`stamp pull`" + ` before changing an existing shared project.
 2. Edit Markdown in documents/ or decks/, and spreadsheets in spreadsheets/.
-3. Run ` + "`stamp preview`" + ` and inspect outputs/.
+3. Use Studio's preview and inspect the result.
 4. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
-
-Run ` + "`stamp agent setup`" + ` once to connect compatible agents to the MCP
-endpoint hosted by ` + "`stamp studio`" + `.
 
 The theme/ folder controls appearance. Read theme/README.md before changing it.
 Never edit outputs/ directly. If pull or push reports a conflict, preserve both
 versions and explain the choice instead of forcing it.
 `
+
+// AgentGuide is the canonical, tool-agnostic guide written into projects and
+// printed by `stamp skill`. Agents need only ordinary files and the Stamp CLI.
+func AgentGuide() string { return agentGuide }
 
 const themeGuide = `# Theme
 

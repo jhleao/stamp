@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jhleao/stamp/internal/bundle"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
@@ -164,32 +163,5 @@ func TestPushLeaseRequiresTheObservedRemoteVersion(t *testing.T) {
 				t.Fatalf("checkLease() error = %v, wantError %v", err, test.wantError)
 			}
 		})
-	}
-}
-
-func TestReconnectPreservesOldLinkAndPublishesNewProject(t *testing.T) {
-	root, drive := pullFixture(t)
-	compiled := time.Now().Add(time.Second)
-	for _, name := range []string{"page.css", "deck.css"} {
-		path := filepath.Join(root, "theme", name)
-		if err := os.Chtimes(path, compiled, compiled); err != nil {
-			t.Fatal(err)
-		}
-	}
-	state, recovery, err := reconnect(context.Background(), drive, root, "space", "Migrate Drive client", func(string) error {
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.FileID != "new-canonical" || state.BaseVersion != "new-version" {
-		t.Fatalf("new state = %#v", state)
-	}
-	data, err := os.ReadFile(recovery)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(data, []byte(`"fileId": "canonical"`)) || !bytes.Contains(data, []byte(`"baseVersion": "1"`)) {
-		t.Fatalf("recovery did not preserve previous link: %s", data)
 	}
 }

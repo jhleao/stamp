@@ -1,9 +1,56 @@
 package main
 
 import (
+	"bytes"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestSkillPrintsCanonicalProjectGuide(t *testing.T) {
+	output, err := captureStdout(func() error { return run([]string{"skill"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "# Working with this Stamp project") || strings.Contains(output, "MCP") {
+		t.Fatalf("unexpected skill output: %q", output)
+	}
+}
+
+func TestTutorialStartsAtZeroAndEndsWithCollaboration(t *testing.T) {
+	output, err := captureStdout(func() error { return run([]string{"tutorial"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Stamp quickstart", "stamp doctor", "stamp login", "stamp new", "stamp studio", "stamp pull", "stamp push", "Add a colleague", "stamp clone"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("tutorial missing %q: %s", want, output)
+		}
+	}
+}
+
+func captureStdout(run func() error) (string, error) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	old := os.Stdout
+	os.Stdout = write
+	err = run()
+	_ = write.Close()
+	os.Stdout = old
+	var output bytes.Buffer
+	_, readErr := io.Copy(&output, read)
+	_ = read.Close()
+	if err != nil || readErr != nil {
+		if err != nil {
+			return "", err
+		}
+		return "", readErr
+	}
+	return output.String(), nil
+}
 
 func TestParseArgsRejectsUnknownOptions(t *testing.T) {
 	_, _, _, err := parseArgs([]string{"--mesage", "typo"}, []string{"message"}, nil)
@@ -13,7 +60,7 @@ func TestParseArgsRejectsUnknownOptions(t *testing.T) {
 }
 
 func TestCommandKeepsUsefulOptionError(t *testing.T) {
-	err := run([]string{"project", "create", "somewhere", "--mesage", "typo"})
+	err := run([]string{"new", "somewhere", "--mesage", "typo"})
 	if err == nil || err.Error() != "unknown option --mesage" {
 		t.Fatalf("error = %v", err)
 	}

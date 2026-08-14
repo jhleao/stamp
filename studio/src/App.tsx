@@ -11,6 +11,7 @@ import { previewURL, usesPdfCanvas } from "./preview";
 import { PdfPreview } from "./PdfPreview";
 import { ComponentPreview } from "./ComponentPreview";
 import { syncActions } from "./sync-policy";
+import { agentPrompt } from "./agent-prompt";
 
 const syncLabels = {
   "local-only": "Local only",
@@ -36,10 +37,6 @@ function DriveMark() {
   </svg>;
 }
 
-function NotionMark() {
-  return <svg class="drive-mark" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3.25" y="3.25" width="17.5" height="17.5"/><path d="M7.5 16.75V7.25l9 9.5v-9.5"/></svg>;
-}
-
 function ExternalLinkIcon() {
   return <svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="square" stroke-linejoin="miter">
     <path d="M6.25 3.25h-3v9.5h9.5v-3M8.25 2.75h5v5M13.25 2.75 7 9" />
@@ -50,6 +47,13 @@ function CopyPathIcon() {
   return <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="square" stroke-linejoin="miter">
     <rect x="5.25" y="5.25" width="7.5" height="7.5" />
     <path d="M10.75 5.25v-2h-7.5v7.5h2" />
+  </svg>;
+}
+
+function AgentIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="square" stroke-linejoin="miter">
+    <rect x="3" y="4.25" width="10" height="8" />
+    <path d="M8 2v2.25M5.5 8h.01M10.5 8h.01M6 10.25h4M1.75 6.5H3M13 6.5h1.25" />
   </svg>;
 }
 
@@ -94,6 +98,17 @@ async function copyWorkspacePath() {
     showNotice("Workspace path copied");
   } catch {
     showNotice("Could not copy workspace path", true);
+  }
+}
+
+async function copyAgentInstructions() {
+  const path = project.value?.workspacePath;
+  if (!path) return;
+  try {
+    await navigator.clipboard.writeText(agentPrompt(path));
+    showNotice("Agent instructions copied");
+  } catch {
+    showNotice("Could not copy agent instructions", true);
   }
 }
 
@@ -166,12 +181,12 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
   onRefreshSync: () => Promise<void>;
 }) {
   const syncState = sync.value?.state;
-  const backend = sync.value?.provider === "notion" ? "Notion" : "Google Drive";
+  const backend = "Google Drive";
   const [refreshing, setRefreshing] = useState(false);
   const { canPull, canPush } = syncActions(syncState);
   return <aside class="flex min-w-0 flex-col bg-rail">
     <header class="drive-identity">
-      {sync.value?.provider === "notion" ? <NotionMark /> : <DriveMark />}
+      <DriveMark />
       <div class="drive-copy">
         <div class="drive-project-row">
           <strong class="drive-project">{sync.value?.driveName || project.value?.project.name || "Opening project…"}</strong>
@@ -190,6 +205,9 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
       <div class="sidebar-tools">
         <button class="sidebar-tool" aria-label="Copy workspace path" title="Copy workspace path" disabled={!project.value?.workspacePath} onClick={copyWorkspacePath}>
           <CopyPathIcon />
+        </button>
+        <button class="sidebar-tool" aria-label="Copy agent instructions" title="Copy agent instructions" disabled={!project.value?.workspacePath} onClick={copyAgentInstructions}>
+          <AgentIcon />
         </button>
         <button class="sidebar-tool" aria-label={`Switch to ${theme.value === "dark" ? "light" : "dark"} mode`}
           title={`Switch to ${theme.value === "dark" ? "light" : "dark"} mode`}
@@ -351,12 +369,11 @@ function SyncEffects({ items }: { items: string[] }) {
   return <div class="sync-effects"><strong>What happens</strong><ul>{items.map((item) => <li>{item}</li>)}</ul></div>;
 }
 
-function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialogElement>; onConfirm: (space: string, message: string, forceWithLease: string) => void }) {
-  const space = useRef<HTMLInputElement>(null);
+function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialogElement>; onConfirm: (message: string, forceWithLease: string) => void }) {
   const message = useRef<HTMLInputElement>(null);
   const confirmation = useRef<HTMLInputElement>(null);
   const diverged = sync.value?.state === "diverged";
-  const backend = sync.value?.provider === "notion" ? "Notion" : "Google Drive";
+  const backend = "Google Drive";
   return <dialog ref={dialog} class="stamp-dialog" onClose={(event) => event.currentTarget.querySelector("form")?.reset()}>
     <form method="dialog" class="p-6">
       <span class="dialog-kicker">Push to {backend}</span>
@@ -376,14 +393,12 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
         `PDFs and other generated outputs are rebuilt and mirrored to ${backend}.`,
         `The previous ${backend} revision remains recoverable through Stamp's source history.`,
       ]} />
-      {sync.value?.firstPush && <label class="dialog-field"><span>Team Space link</span><input ref={space} required placeholder="Paste its Google Drive link" /></label>}
       <label class="dialog-field"><span>Version note</span><input ref={message} required placeholder="Updated the quarterly summary" /></label>
       {diverged && <label class="dialog-confirm"><input ref={confirmation} type="checkbox" required /><span>I reviewed the {backend} drift and want to replace that version.</span></label>}
       <div class="dialog-actions"><button type="button" onClick={() => dialog.current?.close("cancel")}>Cancel</button><button type="button" class="primary" onClick={() => {
-        if (sync.value?.firstPush && !space.current?.value.trim()) return space.current?.reportValidity();
         if (!message.current?.value.trim()) return message.current?.reportValidity();
         if (diverged && !confirmation.current?.checked) return confirmation.current?.reportValidity();
-        onConfirm(space.current?.value.trim() || "", message.current?.value.trim() || "", diverged ? sync.value?.remoteVersion || "" : "");
+        onConfirm(message.current?.value.trim() || "", diverged ? sync.value?.remoteVersion || "" : "");
       }}>{diverged ? `Replace ${backend} version` : "Push version"}</button></div>
     </form>
   </dialog>;
@@ -392,7 +407,7 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
 function PullDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialogElement>; onConfirm: () => void }) {
   const confirmation = useRef<HTMLInputElement>(null);
   const localChanged = Boolean(sync.value?.localChanged);
-  const backend = sync.value?.provider === "notion" ? "Notion" : "Google Drive";
+  const backend = "Google Drive";
   return <dialog ref={dialog} class="stamp-dialog" onClose={(event) => event.currentTarget.querySelector("form")?.reset()}><form method="dialog" class="p-6">
     <span class="dialog-kicker">Pull from {backend}</span>
     <h2>Replace this local workspace?</h2>
@@ -595,7 +610,7 @@ export function App() {
     try {
       sync.value = await api.sync();
       connected.value = true;
-      showNotice(`${sync.value.provider === "notion" ? "Notion" : "Google Drive"} status refreshed`);
+      showNotice("Google Drive status refreshed");
     } catch (error) {
       connected.value = false;
       showNotice((error as Error).message, true);
@@ -649,7 +664,7 @@ export function App() {
           if (!focused && externalChange.value && !draftDirty.value) reloadSource().catch((error) => showNotice(error.message, true));
         }} />
     </main>
-    <PushDialog dialog={pushDialog} onConfirm={(space, message, forceWithLease) => runSyncAction(() => api.push(space, message, forceWithLease), pushDialog.current)} />
+    <PushDialog dialog={pushDialog} onConfirm={(message, forceWithLease) => runSyncAction(() => api.push(message, forceWithLease), pushDialog.current)} />
     <PullDialog dialog={pullDialog} onConfirm={() => runSyncAction(api.pull, pullDialog.current)} />
     {notice.value && <aside class={`notice ${notice.value.error ? "is-error" : ""}`} role="status">{notice.value.message}</aside>}
   </>;

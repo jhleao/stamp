@@ -11,30 +11,7 @@ import (
 
 	"github.com/jhleao/stamp/internal/project"
 	stamptheme "github.com/jhleao/stamp/internal/theme"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
-
-func TestRoutesServeProjectBoundMCP(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "project")
-	if _, err := project.Create(root, "MCP project"); err != nil {
-		t.Fatal(err)
-	}
-	server := &Server{root: root, token: "test", clients: map[chan string]struct{}{}, version: "test"}
-	httpServer := httptest.NewServer(server.routes())
-	defer httpServer.Close()
-	server.host = strings.TrimPrefix(httpServer.URL, "http://")
-	server.origin = httpServer.URL
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
-	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL + "/mcp"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer session.Close()
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "project_status", Arguments: map[string]any{}})
-	if err != nil || result.IsError {
-		t.Fatalf("project_status = %#v, %v", result, err)
-	}
-}
 
 func TestResolveStaysInProject(t *testing.T) {
 	server := &Server{root: t.TempDir()}

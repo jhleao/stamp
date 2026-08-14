@@ -21,7 +21,6 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -221,65 +220,6 @@ func New(ctx context.Context) (*Client, error) {
 		return nil, err
 	}
 	return &Client{api: api}, nil
-}
-
-func (c *Client) Spaces(ctx context.Context) ([]Item, error) {
-	return c.search(ctx, "appProperties has { key='stamp_kind' and value='space' } and trashed=false")
-}
-
-func (c *Client) Projects(ctx context.Context) ([]Item, error) {
-	return c.search(ctx, "appProperties has { key='stamp_kind' and value='project' } and trashed=false")
-}
-
-func (c *Client) InitSpace(ctx context.Context, value, name string) (Item, error) {
-	id := ID(value)
-	item, err := c.Get(ctx, id)
-	if err != nil {
-		var apiErr *googleapi.Error
-		if errors.As(err, &apiErr) && (apiErr.Code == http.StatusForbidden || apiErr.Code == http.StatusNotFound) {
-			return Item{}, errors.New("that folder is not authorized for Stamp; run stamp space pick and choose it in Google Drive")
-		}
-		return Item{}, err
-	}
-	if !item.Folder {
-		return Item{}, errors.New("a Stamp Space must be a Google Drive folder")
-	}
-	if name == "" {
-		name = item.Name
-	}
-	updated, err := c.api.Files.Update(id, &drive.File{AppProperties: map[string]string{"stamp_kind": "space", "stamp_name": name}}).
-		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
-	if err != nil {
-		return Item{}, err
-	}
-	if _, err := c.EnsureFolder(ctx, id, "Projects", map[string]string{"stamp_kind": "projects"}); err != nil {
-		return Item{}, err
-	}
-	if _, err := c.EnsureFolder(ctx, id, "Templates", map[string]string{"stamp_kind": "templates"}); err != nil {
-		return Item{}, err
-	}
-	return toItem(updated), nil
-}
-
-func (c *Client) CreateSpace(ctx context.Context, name string) (Item, error) {
-	if strings.TrimSpace(name) == "" {
-		return Item{}, errors.New("space name is required")
-	}
-	folder, err := c.api.Files.Create(&drive.File{
-		Name:          name,
-		MimeType:      driveFolder,
-		AppProperties: map[string]string{"stamp_kind": "space", "stamp_name": name},
-	}).Fields(fileFields).Context(ctx).Do()
-	if err != nil {
-		return Item{}, err
-	}
-	if _, err := c.EnsureFolder(ctx, folder.Id, "Projects", map[string]string{"stamp_kind": "projects"}); err != nil {
-		return Item{}, err
-	}
-	if _, err := c.EnsureFolder(ctx, folder.Id, "Templates", map[string]string{"stamp_kind": "templates"}); err != nil {
-		return Item{}, err
-	}
-	return toItem(folder), nil
 }
 
 func (c *Client) Get(ctx context.Context, id string) (Item, error) {
