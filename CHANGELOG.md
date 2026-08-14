@@ -1,3 +1,15 @@
+# [2.0.0](https://github.com/jhleao/stamp/compare/v1.0.1...v2.0.0) (2026-08-14)
+
+
+### Features
+
+* publish project-first CLI ([893bfa2](https://github.com/jhleao/stamp/commit/893bfa21e3460f80afd51dd9ab5db6ac720f965a))
+
+
+### BREAKING CHANGES
+
+* Space, project, MCP, Notion, standalone theme, status, and preview commands have been removed in favor of new, clone, pull, push, studio, tutorial, and skill.
+
 ## [1.0.1](https://github.com/jhleao/stamp/compare/v1.0.0...v1.0.1) (2026-08-14)
 
 
