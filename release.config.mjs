@@ -9,6 +9,9 @@ export default {
       prepareCmd: "./scripts/package_release.sh ${nextRelease.version}",
     }],
     ["@semantic-release/github", {
+      successComment: false,
+      failComment: false,
+      releasedLabels: false,
       assets: [
         { path: "dist/*.tar.gz", label: "${nextRelease.name} — Unix archive" },
         { path: "dist/*.zip", label: "${nextRelease.name} — Windows archive" },
