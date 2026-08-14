@@ -36,6 +36,9 @@ jobs:
         run: npm ci
 
       - name: Test
+        env:
+          # GitHub-hosted containers cannot start Chrome's process sandbox.
+          STAMP_CHROME_NO_SANDBOX: "1"
         run: |
           npm run test:studio
           go test ./...
