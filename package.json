@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite --config studio/vite.config.ts",
     "build:studio": "vite build --config studio/vite.config.ts",
+    "release": "semantic-release",
+    "release:dry-run": "semantic-release --dry-run --no-ci",
     "theme:stress": "tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/page.css --minify && tailwindcss -i examples/stress-showcase/theme/tailwind.css -o examples/stress-showcase/theme/deck.css --minify",
     "test:studio": "vitest run --config studio/vite.config.ts"
   },
@@ -31,12 +33,19 @@
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/release-notes-generator": "^14.1.1",
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/preact": "^3.2.4",
     "@types/node": "^26.2.0",
     "jsdom": "^29.1.1",
+    "semantic-release": "^25.0.9",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.2.1",

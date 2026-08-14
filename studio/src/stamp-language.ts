@@ -1,4 +1,5 @@
 import type * as Monaco from "monaco-editor/esm/vs/editor/editor.api";
+import { formatStampDocument } from "./stamp-formatter";
 
 export const stampLanguageId = "stamp";
 
@@ -81,4 +82,12 @@ export function registerStampLanguage(monaco: typeof Monaco) {
     ],
   });
   monaco.languages.setMonarchTokensProvider(stampLanguageId, stampLanguage);
+  monaco.languages.registerDocumentFormattingEditProvider(stampLanguageId, {
+    provideDocumentFormattingEdits(model, options) {
+      return [{
+        range: model.getFullModelRange(),
+        text: formatStampDocument(model.getValue(), options.tabSize),
+      }];
+    },
+  });
 }

@@ -28,6 +28,19 @@ Use the CLI, the local Studio, or the bundled MCP server. They all operate on th
 
 ## Install
 
+Download the archive for your platform from [GitHub Releases](https://github.com/jhleao/steamp/releases), extract it, and place `stamp` on your `PATH`:
+
+```sh
+install -m 0755 stamp ~/.local/bin/stamp
+stamp version
+```
+
+Release archives are published for macOS (Apple silicon and Intel), Linux
+(ARM64 and AMD64), and Windows (AMD64). Verify a download against the attached
+`checksums.txt` before installing it.
+
+To build from source instead:
+
 ```sh
 brew install go node pandoc libreoffice
 brew install --cask google-chrome
@@ -253,6 +266,19 @@ Command | Purpose
 `make smoke` | Build and exercise the end-to-end workflow
 `make stress` | Render the generic stress project
 `make install` | Install the binary to `/usr/local/bin/stamp`
+
+### Releases
+
+Every push to `main` runs the full test suite and semantic-release. Commit
+messages determine the next version:
+
+- `fix:` publishes a patch.
+- `feat:` publishes a minor release.
+- `BREAKING CHANGE:` or `type!:` publishes a major release.
+- `docs:`, `test:`, `chore:`, and other non-product changes do not publish.
+
+The release workflow updates `CHANGELOG.md`, creates a `vX.Y.Z` tag and GitHub
+Release, and attaches macOS, Linux, and Windows archives plus SHA-256 checksums.
 
 ## Documentation
 

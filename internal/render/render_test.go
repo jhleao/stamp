@@ -322,3 +322,27 @@ func TestMarkdownOutputNamesDisambiguatePageAndDeck(t *testing.T) {
 		t.Fatalf("ordinary output base = %q, want report", got)
 	}
 }
+
+func TestRemoveComponentIndentationPreservesMarkdownIndentation(t *testing.T) {
+	source := `<Slide>
+  # Result
+  <Columns>
+    <Card>
+      - First
+        - Nested
+    </Card>
+  </Columns>
+</Slide>`
+	want := `<Slide>
+# Result
+<Columns>
+<Card>
+- First
+  - Nested
+</Card>
+</Columns>
+</Slide>`
+	if got := string(removeComponentIndentation([]byte(source))); got != want {
+		t.Fatalf("component indentation was not normalized:\n%s\nwant:\n%s", got, want)
+	}
+}

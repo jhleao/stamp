@@ -181,6 +181,44 @@ func outputPath(source, name string) string {
 	return filepath.Join("outputs", filepath.Dir(source), name)
 }
 
+var sourceComponentTag = regexp.MustCompile(`</?[A-Z][A-Za-z0-9.-]*(?:\s[^<>]*?)?/?>`)
+
+// removeComponentIndentation lets authors format nested Stamp components as a
+// readable tree without Markdown interpreting four structural spaces as code.
+// Any indentation beyond the component depth is preserved for Markdown lists
+// and fenced code.
+func removeComponentIndentation(source []byte) []byte {
+	lines := strings.Split(string(source), "\n")
+	depth := 0
+	fenced := false
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		leadingClose := 0
+		if !fenced && strings.HasPrefix(trimmed, "</") {
+			leadingClose = 1
+		}
+		lineDepth := max(0, depth-leadingClose)
+		prefix := strings.Repeat(" ", lineDepth*2)
+		lines[index] = strings.TrimPrefix(line, prefix)
+
+		if strings.HasPrefix(trimmed, "```") {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+		for _, tag := range sourceComponentTag.FindAllString(trimmed, -1) {
+			if strings.HasPrefix(tag, "</") {
+				depth = max(0, depth-1)
+			} else if !strings.HasSuffix(tag, "/>") {
+				depth++
+			}
+		}
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
 func HTML(root, source string) ([]byte, error) {
 	baseURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(root) + "/"}).String()
 	return HTMLAt(root, source, baseURL)
@@ -199,6 +237,7 @@ func HTMLAt(root, source, baseURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	body = removeComponentIndentation(body)
 	var rendered bytes.Buffer
 	if err := markdown.Convert(body, &rendered); err != nil {
 		return nil, err
