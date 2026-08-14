@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/jhleao/stamp/compare/v2.0.0...v2.1.0) (2026-08-14)
+
+
+### Features
+
+* streamline Studio file workflows ([82be8eb](https://github.com/jhleao/stamp/commit/82be8eb4a0182a6897f5d02c8598003db4bc77fb))
+
 # [2.0.0](https://github.com/jhleao/stamp/compare/v1.0.1...v2.0.0) (2026-08-14)
 
 
