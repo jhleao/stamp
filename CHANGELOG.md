@@ -1,3 +1,10 @@
+## [2.4.3](https://github.com/jhleao/stamp/compare/v2.4.2...v2.4.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* support reduced-scope Drive cloning ([63ed1fc](https://github.com/jhleao/stamp/commit/63ed1fc8a3eeb8206ac898bdeec3eb0ac726a1d3))
+
 ## [2.4.2](https://github.com/jhleao/stamp/compare/v2.4.1...v2.4.2) (2026-08-25)
 
 
