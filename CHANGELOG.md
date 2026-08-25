@@ -1,3 +1,15 @@
+# [2.4.0](https://github.com/jhleao/stamp/compare/v2.3.0...v2.4.0) (2026-08-25)
+
+
+### Bug Fixes
+
+* register created and cloned projects ([b8119fa](https://github.com/jhleao/stamp/commit/b8119fa0a9fff0c3cef518e58c8c985b40f15adb))
+
+
+### Features
+
+* remember Studio projects ([f3ddfca](https://github.com/jhleao/stamp/commit/f3ddfca5a259e41e245e77f38ed5e92a2c1a0e98))
+
 # [2.3.0](https://github.com/jhleao/stamp/compare/v2.2.1...v2.3.0) (2026-08-25)
 
 
