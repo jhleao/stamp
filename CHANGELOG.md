@@ -1,3 +1,10 @@
+## [2.2.1](https://github.com/jhleao/stamp/compare/v2.2.0...v2.2.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* exercise self-update distribution ([60d94f6](https://github.com/jhleao/stamp/commit/60d94f6ccfa5bedfdc6916a0161a58eb7c20ac4b))
+
 # [2.2.0](https://github.com/jhleao/stamp/compare/v2.1.1...v2.2.0) (2026-08-25)
 
 
