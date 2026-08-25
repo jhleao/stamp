@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -25,7 +26,11 @@ var version = "dev"
 func main() {
 	if automaticUpdateChecksEnabled() && shouldCheckForUpdate(os.Args[1:]) {
 		if update, err := updater.StartupCheck(version); err == nil && update.Available {
-			fmt.Fprintf(os.Stderr, "Stamp %s is available. Run `stamp update`.\n", update.Latest)
+			command := "stamp update"
+			if updater.ManagedByHomebrew() {
+				command = "brew upgrade stamp"
+			}
+			fmt.Fprintf(os.Stderr, "Stamp %s is available. Run `%s`.\n", update.Latest, command)
 		}
 	}
 	if err := run(os.Args[1:]); err != nil {
@@ -61,6 +66,8 @@ func run(args []string) error {
 		return nil
 	case "update":
 		return updateCommand(args[1:])
+	case "setup":
+		return setupCommand(args[1:])
 	case "new":
 		return newCommand(args[1:])
 	case "clone":
@@ -115,22 +122,16 @@ const tutorial = `# Stamp quickstart
 Stamp keeps a document project in Google Drive and opens a local Studio where
 you can edit its content, components, and visual theme.
 
-## 1. Check this computer
+## 1. Set up this computer
 
-    stamp doctor
+    stamp setup
 
-Install anything marked missing, then run the check again.
+Stamp checks the authoring tools, offers to install anything missing, connects
+Google Drive, and guides you into creating or cloning a project.
 Release builds also support ` + "`stamp update`" + ` and notify you when a newer
 version is available.
 
-## 2. Connect Google Drive
-
-    stamp login
-
-Your browser opens. Sign in and allow Stamp to manage Google Drive. Stamp uses
-that access only for Stamp projects you create or select.
-
-## 3. Create your first project
+## 2. Create your first project
 
     stamp new first-project --name "First project"
     cd first-project
@@ -138,14 +139,14 @@ that access only for Stamp projects you create or select.
 Stamp creates the local folder and its connected Google Drive project together.
 The folder contains readable Markdown content and its complete visual theme.
 
-## 4. Open Studio
+## 3. Open Studio
 
     stamp studio
 
 Edit Content for the words. Edit Templates for TSX components, Tailwind, and
 assets. Save and inspect the preview before sharing.
 
-## 5. Start a session with an AI agent
+## 4. Start a session with an AI agent
 
 Most Stamp work is designed to happen with an AI agent. In Studio, click the
 robot button at the top right of the sidebar. It copies a ready-to-paste prompt
@@ -178,6 +179,139 @@ run ` + "`stamp login`" + `:
 The Studio robot button is the quickest way to start another agent session.
 New projects also contain AGENTS.md and CLAUDE.md instructions.
 `
+
+func setupCommand(args []string) error {
+	if len(args) != 0 {
+		return errors.New("usage: stamp setup")
+	}
+	if !isTerminal(os.Stdin) {
+		return errors.New("setup is interactive; run it in a terminal")
+	}
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Stamp setup")
+	fmt.Println()
+	missing := false
+	for _, check := range doctor.Run() {
+		if !check.OK && check.Name != "Google OAuth" {
+			missing = true
+			fmt.Printf("missing  %-20s %s\n", check.Name, check.Detail)
+		}
+	}
+	if missing {
+		ok, err := confirm(reader, "Install missing tools with Homebrew?", true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("setup stopped; run `stamp doctor` for the missing tools")
+		}
+		if err := doctor.InstallMissing(context.Background(), os.Stdout); err != nil {
+			return err
+		}
+	}
+	if err := doctorCommand(nil); err != nil {
+		return err
+	}
+
+	ok, err := confirm(reader, "Connect Google Drive now?", true)
+	if err != nil {
+		return err
+	}
+	if ok {
+		message, err := stampdrive.Login(context.Background())
+		if err != nil {
+			return err
+		}
+		fmt.Println(message)
+	}
+
+	fmt.Print("\nNext: [1] Clone a project  [2] Create a project  [3] Finish\nChoose [1]: ")
+	choice, err := readLine(reader)
+	if err != nil {
+		return err
+	}
+	switch choice {
+	case "", "1":
+		return setupClone(reader)
+	case "2":
+		return setupNew(reader)
+	case "3":
+		fmt.Println("Setup complete. Run `stamp tutorial` whenever you need the workflow.")
+		return nil
+	default:
+		return errors.New("choose 1, 2, or 3")
+	}
+}
+
+func setupClone(reader *bufio.Reader) error {
+	fmt.Print("Local workspace folder [stamp-project]: ")
+	dir, err := readLine(reader)
+	if err != nil {
+		return err
+	}
+	dir = defaultString(dir, "stamp-project")
+	if err := cloneCommand([]string{dir}); err != nil {
+		return err
+	}
+	return offerStudio(reader, dir)
+}
+
+func setupNew(reader *bufio.Reader) error {
+	fmt.Print("Local workspace folder [my-project]: ")
+	dir, err := readLine(reader)
+	if err != nil {
+		return err
+	}
+	dir = defaultString(dir, "my-project")
+	fmt.Print("Project name [My Project]: ")
+	name, err := readLine(reader)
+	if err != nil {
+		return err
+	}
+	name = defaultString(name, "My Project")
+	if err := newCommand([]string{dir, "--name", name}); err != nil {
+		return err
+	}
+	return offerStudio(reader, dir)
+}
+
+func offerStudio(reader *bufio.Reader, dir string) error {
+	ok, err := confirm(reader, "Open Studio now?", true)
+	if err != nil || !ok {
+		return err
+	}
+	return studioCommand([]string{"--dir", dir})
+}
+
+func confirm(reader *bufio.Reader, prompt string, defaultYes bool) (bool, error) {
+	suffix := " [y/N] "
+	if defaultYes {
+		suffix = " [Y/n] "
+	}
+	fmt.Print(prompt + suffix)
+	answer, err := readLine(reader)
+	if err != nil {
+		return false, err
+	}
+	if answer == "" {
+		return defaultYes, nil
+	}
+	answer = strings.ToLower(answer)
+	return answer == "y" || answer == "yes", nil
+}
+
+func readLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
 
 func newCommand(args []string) error {
 	pos, opts, _, err := parseArgs(args, []string{"name"}, nil)
@@ -354,6 +488,10 @@ func updateCommand(args []string) error {
 		fmt.Printf("Stamp %s is up to date.\n", version)
 		return nil
 	}
+	if updater.ManagedByHomebrew() {
+		fmt.Printf("Stamp %s is available. This installation is managed by Homebrew; run `brew upgrade stamp`.\n", result.Latest)
+		return nil
+	}
 	if !flags["yes"] {
 		info, err := os.Stdin.Stat()
 		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
@@ -398,6 +536,7 @@ func usage() {
 	fmt.Print(`Stamp makes document projects with people and agents.
 
 Usage:
+  stamp setup
   stamp login | logout
   stamp new <directory> [--name <name>]
   stamp clone [directory]

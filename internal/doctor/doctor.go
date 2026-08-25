@@ -1,6 +1,10 @@
 package doctor
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -9,6 +13,13 @@ import (
 	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/theme"
 )
+
+var brewPackages = map[string][]string{
+	"Chrome":      {"install", "--cask", "google-chrome"},
+	"LibreOffice": {"install", "--cask", "libreoffice"},
+	"Pandoc":      {"install", "pandoc"},
+	"Tailwind":    {"install", "tailwindcss"},
+}
 
 type Check struct {
 	Name   string `json:"name"`
@@ -39,6 +50,29 @@ func Run() []Check {
 	}
 	checks = append(checks, Check{Name: "Google OAuth", OK: credentialErr == nil, Detail: detail})
 	return checks
+}
+
+// InstallMissing installs Stamp's external authoring tools with Homebrew.
+// Google authentication is deliberately handled by `stamp login` instead.
+func InstallMissing(ctx context.Context, output io.Writer) error {
+	brew, err := exec.LookPath("brew")
+	if err != nil {
+		return errors.New("Homebrew is required to install missing tools; install it from https://brew.sh, then run `stamp setup` again")
+	}
+	for _, check := range Run() {
+		args, installable := brewPackages[check.Name]
+		if check.OK || !installable {
+			continue
+		}
+		fmt.Fprintf(output, "Installing %s...\n", check.Name)
+		command := exec.CommandContext(ctx, brew, args...)
+		command.Stdout = output
+		command.Stderr = output
+		if err := command.Run(); err != nil {
+			return fmt.Errorf("install %s: %w", check.Name, err)
+		}
+	}
+	return nil
 }
 
 func executable(name string, path string, err error) Check {

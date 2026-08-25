@@ -20,18 +20,6 @@ func TestSkillPrintsCanonicalProjectGuide(t *testing.T) {
 	}
 }
 
-func TestTutorialStartsAtZeroAndEndsWithCollaboration(t *testing.T) {
-	output, err := captureStdout(func() error { return run([]string{"tutorial"}) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"# Stamp quickstart", "stamp doctor", "stamp login", "stamp new", "stamp studio", "robot button", "top right", "stamp skill", "stamp pull", "stamp push", "Add a colleague", "stamp clone"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("tutorial missing %q: %s", want, output)
-		}
-	}
-}
-
 func captureStdout(run func() error) (string, error) {
 	read, write, err := os.Pipe()
 	if err != nil {

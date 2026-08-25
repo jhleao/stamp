@@ -35,9 +35,15 @@ For defense in depth, you may also revoke Stamp under Google Account → Securit
 → Third-party apps and services. This invalidates any token that remains outside
 the current Mac.
 
-## 3. Remove the binary
+## 3. Remove Stamp
 
-The current release and source installation instructions place one binary in
+For a Homebrew installation:
+
+```sh
+brew uninstall stamp
+```
+
+The fallback installer and source installation place one binary in
 `$HOME/.local/bin`:
 
 ```sh
@@ -72,12 +78,12 @@ test "$(readlink CLAUDE.md)" = 'AGENTS.md' && rm CLAUDE.md
 Delete the cloned Stamp repository only if it contains no work you need. Stamp
 projects normally live elsewhere and are not part of the repository.
 
-The prerequisites are installed independently. Keep them if other tools use
-them. If Stamp was their only consumer:
+Homebrew keeps shared dependencies when Stamp is removed. Keep them if other
+tools use them. If Stamp was their only consumer:
 
 ```sh
-npm uninstall -g @tailwindcss/cli
-brew uninstall pandoc libreoffice
+brew uninstall pandoc tailwindcss
+brew uninstall --cask libreoffice
 brew uninstall --cask google-chrome
 ```
 

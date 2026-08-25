@@ -1,7 +1,7 @@
 # Google Drive
 
-Stamp uses its first-party OAuth desktop client with the narrow `drive.file`
-scope. Sign in once:
+`stamp setup` connects Google Drive during first-time setup. To reconnect or
+switch accounts later, sign in directly:
 
 ```sh
 stamp login

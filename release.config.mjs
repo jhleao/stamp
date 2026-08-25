@@ -7,6 +7,7 @@ export default {
     ["@semantic-release/changelog", { changelogFile: "CHANGELOG.md" }],
     ["@semantic-release/exec", {
       prepareCmd: "./scripts/package_release.sh ${nextRelease.version}",
+      successCmd: "./scripts/update_homebrew_tap.sh ${nextRelease.version}",
     }],
     ["@semantic-release/github", {
       successComment: false,

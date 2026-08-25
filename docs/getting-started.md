@@ -9,11 +9,17 @@ stamp tutorial
 The complete first-time path is:
 
 ```sh
-stamp doctor
-stamp login
+brew install jhleao/tap/stamp
+stamp setup
+```
+
+Setup checks the machine, offers to install missing tools, connects Google
+Drive, and guides you through creating or cloning a project and opening Studio.
+Run the individual commands below when you already know which project you want:
+
+```sh
 stamp new board-pack --name "Board Pack"
-cd board-pack
-stamp studio
+cd board-pack && stamp studio
 ```
 
 `stamp new` creates the local workspace and connected Google Drive project as

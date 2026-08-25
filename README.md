@@ -6,19 +6,22 @@ is a focused local editor.
 
 ## Install
 
-Download the archive for your platform from
-[GitHub Releases](https://github.com/jhleao/stamp/releases) and extract it. On
-macOS, install the downloaded binary for your user:
+Install with Homebrew, then let Stamp prepare the authoring tools and Google
+Drive connection:
 
 ```sh
-mkdir -p "$HOME/.local/bin"
-install -m 755 stamp "$HOME/.local/bin/stamp"
-stamp doctor
-stamp login
+brew install jhleao/tap/stamp
+stamp setup
 ```
 
-Ensure `$HOME/.local/bin` is on your `PATH`. To build from a source checkout
-instead:
+Without Homebrew, use the signed release installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jhleao/stamp/main/scripts/install.sh | sh
+stamp setup
+```
+
+To build from a source checkout instead:
 
 ```sh
 npm ci
@@ -40,6 +43,9 @@ stamp update --check       # check without changing anything
 stamp update               # review and install the latest release
 stamp update --yes         # install without the confirmation prompt
 ```
+
+Homebrew installations stay owned by Homebrew; Stamp reports available updates
+and directs those installations to `brew upgrade stamp`.
 
 Stamp downloads the archive for the current operating system and architecture,
 verifies it against the release's SHA-256 manifest, validates the embedded
@@ -92,6 +98,7 @@ workspace path and the instruction to run `stamp skill`.
 
 ```text
 stamp login | logout
+stamp setup
 stamp new <dir> [--name <name>]
 stamp clone [dir]
 stamp pull [--incoming|--replace]
@@ -108,10 +115,11 @@ stamp version
 
 ```sh
 stamp logout
-rm "$HOME/.local/bin/stamp"
+brew uninstall stamp
 rm -rf "$HOME/Library/Application Support/Stamp"
 ```
 
+For fallback or source installations, remove `$HOME/.local/bin/stamp` instead.
 Project folders and Drive data are never removed automatically.
 
 ## Reference

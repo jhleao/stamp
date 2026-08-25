@@ -62,6 +62,22 @@ type cache struct {
 	PageURL   string    `json:"pageUrl"`
 }
 
+// ManagedByHomebrew reports whether the running binary belongs to a Homebrew
+// Cellar. Package-managed binaries must be upgraded through their owner so the
+// installation receipt and linked version stay consistent.
+func ManagedByHomebrew() bool {
+	executable, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return false
+	}
+	path := filepath.ToSlash(executable)
+	return strings.Contains(path, "/Cellar/stamp/")
+}
+
 func Check(ctx context.Context, current string) (Result, error) {
 	if !isReleaseVersion(current) {
 		return Result{}, fmt.Errorf("%q is a development build; update it from its source checkout", current)
