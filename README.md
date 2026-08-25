@@ -6,15 +6,46 @@ is a focused local editor.
 
 ## Install
 
-Download the archive for your platform from GitHub Releases, extract it, and put
-`stamp` on `PATH`. On macOS:
+Download the archive for your platform from
+[GitHub Releases](https://github.com/jhleao/stamp/releases) and extract it. On
+macOS, install the downloaded binary for your user:
 
 ```sh
-xattr -d com.apple.quarantine stamp 2>/dev/null || true
-install -m 755 stamp /usr/local/bin/stamp
+mkdir -p "$HOME/.local/bin"
+install -m 755 stamp "$HOME/.local/bin/stamp"
 stamp doctor
 stamp login
 ```
+
+Ensure `$HOME/.local/bin` is on your `PATH`. To build from a source checkout
+instead:
+
+```sh
+npm ci
+make install
+```
+
+`make install` builds the embedded Studio and installs Stamp to
+`$HOME/.local/bin`. Override `PREFIX` or `BINDIR` if needed.
+
+## Update
+
+Release builds used from an interactive terminal check GitHub for a newer
+version at most once per day. The check has a short timeout, never blocks a
+command after its cached result is fresh, and can be disabled with
+`STAMP_NO_UPDATE_CHECK=1`.
+
+```sh
+stamp update --check       # check without changing anything
+stamp update               # review and install the latest release
+stamp update --yes         # install without the confirmation prompt
+```
+
+Stamp downloads the archive for the current operating system and architecture,
+verifies it against the release's SHA-256 manifest, validates the embedded
+version, and atomically replaces the current binary. Self-update is intended
+for release binaries installed directly in a user-writable location such as
+`$HOME/.local/bin`; source builds should be rebuilt with `make install`.
 
 ## Start
 
@@ -54,6 +85,8 @@ stamp skill
 
 New projects contain the same guide in `AGENTS.md` and a `CLAUDE.md` symlink for
 Claude Code. Agents edit ordinary files and use the CLI like everyone else.
+Studio's robot button copies a ready-to-paste agent prompt containing the
+workspace path and the instruction to run `stamp skill`.
 
 ## Commands
 
@@ -67,13 +100,15 @@ stamp studio [--dir <dir>] [--no-open]
 stamp skill
 stamp tutorial
 stamp doctor
+stamp update [--check|--yes]
 stamp version
 ```
 
 ## Uninstall
 
 ```sh
-rm /usr/local/bin/stamp
+stamp logout
+rm "$HOME/.local/bin/stamp"
 rm -rf "$HOME/Library/Application Support/Stamp"
 ```
 

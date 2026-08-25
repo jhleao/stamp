@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jhleao/stamp/internal/collab"
 	"github.com/jhleao/stamp/internal/doctor"
@@ -16,15 +17,29 @@ import (
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/studio"
+	"github.com/jhleao/stamp/internal/updater"
 )
 
 var version = "dev"
 
 func main() {
+	if automaticUpdateChecksEnabled() && shouldCheckForUpdate(os.Args[1:]) {
+		if update, err := updater.StartupCheck(version); err == nil && update.Available {
+			fmt.Fprintf(os.Stderr, "Stamp %s is available. Run `stamp update`.\n", update.Latest)
+		}
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "stamp:", err)
 		os.Exit(1)
 	}
+}
+
+func automaticUpdateChecksEnabled() bool {
+	if os.Getenv("CI") != "" || os.Getenv("STAMP_NO_UPDATE_CHECK") != "" {
+		return false
+	}
+	info, err := os.Stderr.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func run(args []string) error {
@@ -44,6 +59,8 @@ func run(args []string) error {
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
+	case "update":
+		return updateCommand(args[1:])
 	case "new":
 		return newCommand(args[1:])
 	case "clone":
@@ -103,12 +120,15 @@ you can edit its content, components, and visual theme.
     stamp doctor
 
 Install anything marked missing, then run the check again.
+Release builds also support ` + "`stamp update`" + ` and notify you when a newer
+version is available.
 
 ## 2. Connect Google Drive
 
     stamp login
 
-Your browser opens. Sign in and allow Stamp to manage the Drive files it creates.
+Your browser opens. Sign in and allow Stamp to manage Google Drive. Stamp uses
+that access only for Stamp projects you create or select.
 
 ## 3. Create your first project
 
@@ -303,6 +323,77 @@ func doctorCommand(args []string) error {
 	return nil
 }
 
+func updateCommand(args []string) error {
+	pos, _, flags, err := parseArgs(args, nil, []string{"check", "yes"})
+	if err != nil {
+		return err
+	}
+	if len(pos) != 0 || (flags["check"] && flags["yes"]) {
+		return errors.New("usage: stamp update [--check|--yes]")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if flags["check"] {
+		result, err := updater.Check(ctx, version)
+		if err != nil {
+			return err
+		}
+		if result.Available {
+			fmt.Printf("Stamp %s is available (installed: %s)\n%s\n", result.Latest, result.Current, result.PageURL)
+		} else {
+			fmt.Printf("Stamp %s is up to date.\n", version)
+		}
+		return nil
+	}
+
+	result, err := updater.Check(ctx, version)
+	if err != nil {
+		return err
+	}
+	if !result.Available {
+		fmt.Printf("Stamp %s is up to date.\n", version)
+		return nil
+	}
+	if !flags["yes"] {
+		info, err := os.Stdin.Stat()
+		if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+			return fmt.Errorf("Stamp %s is available; rerun with --yes to install it", result.Latest)
+		}
+		fmt.Printf("Stamp %s is available:\n%s\nUpdate Stamp %s → %s? [y/N] ", result.Latest, result.PageURL, version, result.Latest)
+		var answer string
+		if _, err := fmt.Fscanln(os.Stdin, &answer); err != nil {
+			fmt.Println("Update cancelled.")
+			return nil
+		}
+		if strings.ToLower(strings.TrimSpace(answer)) != "y" && strings.ToLower(strings.TrimSpace(answer)) != "yes" {
+			fmt.Println("Update cancelled.")
+			return nil
+		}
+	}
+	release, installed, err := updater.Install(ctx, version, result.Latest)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		fmt.Printf("Stamp %s is up to date.\n", version)
+		return nil
+	}
+	fmt.Printf("Updated Stamp to %s. Restart any running Studio process.\n", release.Version)
+	return nil
+}
+
+func shouldCheckForUpdate(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "update", "version", "--version", "-v", "help", "--help", "-h":
+		return false
+	default:
+		return true
+	}
+}
+
 func usage() {
 	fmt.Print(`Stamp makes document projects with people and agents.
 
@@ -316,6 +407,7 @@ Usage:
   stamp tutorial
   stamp skill
   stamp doctor
+  stamp update [--check|--yes]
   stamp version
 `)
 }

@@ -1,4 +1,6 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 PICKER_API_KEY ?=
 GO_LDFLAGS := -X main.version=$(VERSION)
 ifneq ($(strip $(PICKER_API_KEY)),)
@@ -22,4 +24,5 @@ smoke: build
 	./scripts/smoke.sh
 
 install: build
-	install -m 0755 bin/stamp /usr/local/bin/stamp
+	mkdir -p "$(BINDIR)"
+	install -m 0755 bin/stamp "$(BINDIR)/stamp"
