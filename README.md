@@ -69,6 +69,9 @@ stamp clone quarterly
 cd quarterly && stamp studio
 ```
 
+Studio remembers projects it opens. Run `stamp studio` from anywhere to choose
+from those workspaces; missing or disconnected paths are removed automatically.
+
 ## Daily loop
 
 ```sh

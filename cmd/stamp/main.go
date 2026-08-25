@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -430,13 +431,50 @@ func studioCommand(args []string) error {
 	if len(pos) != 0 {
 		return errors.New("usage: stamp studio [--dir <directory>] [--no-open]")
 	}
-	root, err := project.FindRoot(defaultString(opts["dir"], "."))
+	root, err := studioRoot(opts["dir"])
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return studio.Start(ctx, root, !flags["no-open"], version)
+}
+
+func studioRoot(directory string) (string, error) {
+	if directory != "" {
+		return project.FindRoot(directory)
+	}
+	if root, err := project.FindRoot("."); err == nil {
+		return root, nil
+	}
+	if !isTerminal(os.Stdin) {
+		return "", errors.New("no Stamp project found; run stamp studio in a project or pass --dir <directory>")
+	}
+	projects, err := project.KnownProjects()
+	if err != nil {
+		return "", fmt.Errorf("read known Stamp projects: %w", err)
+	}
+	if len(projects) == 0 {
+		return "", errors.New("no known Stamp projects; create one with stamp new or check one out with stamp clone")
+	}
+
+	fmt.Println("Select a Stamp project:")
+	for index, known := range projects {
+		fmt.Printf("  %d. %s\n     %s\n", index+1, known.Name, known.Path)
+	}
+	fmt.Print("Choose [1]: ")
+	choice, err := readLine(bufio.NewReader(os.Stdin))
+	if err != nil {
+		return "", err
+	}
+	if choice == "" {
+		return projects[0].Path, nil
+	}
+	selection, err := strconv.Atoi(choice)
+	if err != nil || selection < 1 || selection > len(projects) {
+		return "", fmt.Errorf("choose a number from 1 to %d", len(projects))
+	}
+	return projects[selection-1].Path, nil
 }
 
 func doctorCommand(args []string) error {
