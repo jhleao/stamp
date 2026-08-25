@@ -127,7 +127,7 @@ func Start(ctx context.Context, root string, openBrowser bool, version string) e
 	server.host = listener.Addr().String()
 	server.origin = "http://" + server.host
 	if err := project.Remember(root); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: could not remember this Studio workspace:", err)
+		fmt.Fprintln(os.Stderr, "warning: could not remember this workspace:", err)
 	}
 	httpServer := &http.Server{Handler: server.routes(), ReadHeaderTimeout: 5 * time.Second}
 	go server.watch(ctx)

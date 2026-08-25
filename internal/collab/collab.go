@@ -29,6 +29,11 @@ type VersionInfo struct {
 	ParentVersion string `json:"parentVersion,omitempty"`
 }
 
+type Workspace struct {
+	Root  string
+	State project.RemoteState
+}
+
 type PullMode string
 
 // Drive is the small storage surface collaboration needs. Keeping it here
@@ -52,63 +57,70 @@ const (
 	PullReplace  PullMode = "replace"
 )
 
-func Open(ctx context.Context, drive Drive, value, destination string) (project.RemoteState, error) {
+func Open(ctx context.Context, drive Drive, value, destination string) (Workspace, error) {
 	item, err := drive.Get(ctx, stampdrive.ID(value))
 	if err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	var canonical, folder stampdrive.Item
 	if item.Folder {
 		folder = item
 		found, ok, err := drive.FindChildByProperty(ctx, item.ID, "stamp_kind", "canonical")
 		if err != nil {
-			return project.RemoteState{}, err
+			return Workspace{}, err
 		}
 		if !ok {
-			return project.RemoteState{}, errors.New("Drive folder is not a Stamp project")
+			return Workspace{}, errors.New("Drive folder is not a Stamp project")
 		}
 		canonical = found
 	} else {
 		canonical = item
 		if len(item.Parents) == 0 {
-			return project.RemoteState{}, errors.New("canonical project has no parent folder")
+			return Workspace{}, errors.New("canonical project has no parent folder")
 		}
 		folder, err = drive.Get(ctx, item.Parents[0])
 		if err != nil {
-			return project.RemoteState{}, err
+			return Workspace{}, err
 		}
 	}
 	if destination == "" {
 		destination = safeName(strings.TrimSuffix(canonical.Name, ".stamp"))
 	}
 	if entries, err := os.ReadDir(destination); err == nil && len(entries) > 0 {
-		return project.RemoteState{}, fmt.Errorf("%s is not empty", destination)
+		return Workspace{}, fmt.Errorf("%s is not empty", destination)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	contents, err := drive.Download(ctx, canonical.ID)
 	if err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	if err := unpackNewWorkspace(contents, destination); err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	if err := project.EnsureAgentCompatibility(destination); err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
 	if err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	if !ok {
-		return project.RemoteState{}, errors.New("Drive project has no Current folder")
+		return Workspace{}, errors.New("Drive project has no Current folder")
 	}
 	hashes, err := project.FileHashes(destination)
 	if err != nil {
-		return project.RemoteState{}, err
+		return Workspace{}, err
 	}
 	state := project.RemoteState{FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID, BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL, Files: hashes}
-	return state, project.WriteState(destination, state)
+	if err := project.WriteState(destination, state); err != nil {
+		return Workspace{}, err
+	}
+	root, err := filepath.Abs(destination)
+	if err != nil {
+		return Workspace{}, err
+	}
+	return Workspace{Root: root, State: state}, nil
 }
 
 func unpackNewWorkspace(contents []byte, destination string) error {

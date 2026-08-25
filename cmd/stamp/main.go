@@ -338,6 +338,7 @@ func newCommand(args []string) error {
 	if err != nil {
 		return fmt.Errorf("created %s locally, but could not create its Drive project: %w", dir, err)
 	}
+	rememberProject(dir)
 	fmt.Printf("Created %s\n%s\n%s\n", manifest.Name, dir, state.WebURL)
 	return nil
 }
@@ -358,12 +359,19 @@ func cloneCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := collab.Open(context.Background(), drive, id, destination)
+	workspace, err := collab.Open(context.Background(), drive, id, destination)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Cloned Drive version %s\n", state.BaseVersion)
+	rememberProject(workspace.Root)
+	fmt.Printf("Cloned Drive version %s\n", workspace.State.BaseVersion)
 	return nil
+}
+
+func rememberProject(root string) {
+	if err := project.Remember(root); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not remember this workspace:", err)
+	}
 }
 
 func pullCommand(args []string) error {
