@@ -1,3 +1,10 @@
+## [2.1.1](https://github.com/jhleao/stamp/compare/v2.1.0...v2.1.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* verify notarized macOS distribution ([e6fe186](https://github.com/jhleao/stamp/commit/e6fe186f5b829e400fece0633b614f0f1a6903b3))
+
 # [2.1.0](https://github.com/jhleao/stamp/compare/v2.0.0...v2.1.0) (2026-08-14)
 
 
