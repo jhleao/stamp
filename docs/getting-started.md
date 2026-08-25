@@ -39,7 +39,7 @@ Share the project folder in Google Drive. A colleague checks it out with:
 ```sh
 stamp login
 stamp clone board-pack
-# Choose the shared project folder in Google Picker.
+# Choose the project folder or its .stamp archive in Google Picker.
 cd board-pack
 stamp studio
 ```

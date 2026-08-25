@@ -65,12 +65,15 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	var canonical, folder stampdrive.Item
 	if item.Folder {
 		folder = item
+		if !item.CanEdit {
+			return Workspace{}, errors.New("the selected Drive folder is read-only; ask its owner for Editor access")
+		}
 		found, ok, err := drive.FindChildByProperty(ctx, item.ID, "stamp_kind", "canonical")
 		if err != nil {
 			return Workspace{}, err
 		}
 		if !ok {
-			return Workspace{}, errors.New("Drive folder is not a Stamp project")
+			return Workspace{}, errors.New("Drive folder is not a Stamp project, or its archive is not authorized; run stamp clone again and select the .stamp archive inside this folder")
 		}
 		canonical = found
 	} else {

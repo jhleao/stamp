@@ -22,13 +22,16 @@ To work on a shared project:
 
 ```sh
 stamp clone board-pack
-# Choose the shared project folder in Google Picker.
+# Choose the project folder or its .stamp archive in Google Picker.
 cd board-pack
 stamp studio
 ```
 
-Picker is required because a shared URL alone does not grant an application
-using `drive.file` access to that folder.
+Stamp requests only Google’s per-file `drive.file` permission. Picker makes the
+project grant explicit without exposing the rest of the user’s Drive. Select
+the project folder first. If Stamp says its archive is not authorized, run
+`stamp clone` again and select the `.stamp` archive inside that folder; this is
+needed only when the archive predates that collaborator’s Stamp authorization.
 
 Stamp stores the canonical project as one `.stamp` archive. Each Push creates a
 retained Drive revision and uses its immutable content version as a lease. The

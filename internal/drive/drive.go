@@ -24,7 +24,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-const keychainService = "sh.stamp.google-drive"
+const defaultKeychainService = "sh.stamp.google-drive"
 
 const (
 	defaultClientID     = "REMOVED_GOOGLE_OAUTH_CLIENT_ID"
@@ -55,6 +55,7 @@ type Item struct {
 	ID       string            `json:"id"`
 	Name     string            `json:"name"`
 	Folder   bool              `json:"folder"`
+	CanEdit  bool              `json:"canEdit"`
 	Version  string            `json:"version,omitempty"`
 	WebURL   string            `json:"webUrl,omitempty"`
 	Parents  []string          `json:"parents,omitempty"`
@@ -166,6 +167,7 @@ func Login(ctx context.Context) (string, error) {
 	})
 	go server.Serve(listener)
 	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce, oauth2.S256ChallengeOption(verifier))
+	fmt.Fprintln(os.Stderr, "Continue in your browser:", authURL)
 	if err := exec.Command("open", authURL).Start(); err != nil {
 		return "", fmt.Errorf("open browser: %w", err)
 	}
@@ -198,7 +200,7 @@ func Logout() error {
 		return err
 	}
 	_ = config
-	cmd := exec.Command("security", "delete-generic-password", "-s", keychainService, "-a", clientID)
+	cmd := exec.Command("security", "delete-generic-password", "-s", keychainService(), "-a", clientID)
 	if output, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "could not be found") {
 		return fmt.Errorf("keychain: %v: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -424,7 +426,7 @@ func fileExists(path string) bool {
 }
 
 func loadToken(account string) (*oauth2.Token, error) {
-	output, err := exec.Command("security", "find-generic-password", "-s", keychainService, "-a", account, "-w").Output()
+	output, err := exec.Command("security", "find-generic-password", "-s", keychainService(), "-a", account, "-w").Output()
 	if err != nil {
 		return nil, errors.New("not logged in; run stamp login")
 	}
@@ -440,7 +442,7 @@ func saveToken(account string, token *oauth2.Token) error {
 	if err != nil {
 		return err
 	}
-	output, err := exec.Command("security", "add-generic-password", "-U", "-s", keychainService, "-a", account, "-w", string(data)).CombinedOutput()
+	output, err := exec.Command("security", "add-generic-password", "-U", "-s", keychainService(), "-a", account, "-w", string(data)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("save token in Keychain: %v: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -453,6 +455,13 @@ func randomToken() string {
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 
+func keychainService() string {
+	if service := strings.TrimSpace(os.Getenv("STAMP_GOOGLE_KEYCHAIN_SERVICE")); service != "" {
+		return service
+	}
+	return defaultKeychainService
+}
+
 func escape(value string) string {
 	return strings.ReplaceAll(value, "'", "\\'")
 }
@@ -462,10 +471,11 @@ func toItem(file *drive.File) Item {
 	if version == "" {
 		version = strconv.FormatInt(file.Version, 10)
 	}
-	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, Version: version, WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties, revision: file.HeadRevisionId}
+	canEdit := file.Capabilities != nil && file.Capabilities.CanEdit
+	return Item{ID: file.Id, Name: file.Name, Folder: file.MimeType == driveFolder, CanEdit: canEdit, Version: version, WebURL: file.WebViewLink, Parents: file.Parents, Props: file.AppProperties, revision: file.HeadRevisionId}
 }
 
 const (
 	driveFolder = "application/vnd.google-apps.folder"
-	fileFields  = "id,name,mimeType,version,headRevisionId,webViewLink,parents,appProperties,md5Checksum"
+	fileFields  = "id,name,mimeType,version,headRevisionId,webViewLink,parents,appProperties,md5Checksum,capabilities(canEdit)"
 )
