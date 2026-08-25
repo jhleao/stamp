@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/jhleao/stamp/compare/v2.2.1...v2.3.0) (2026-08-25)
+
+
+### Features
+
+* add guided installation ([fc2f6c8](https://github.com/jhleao/stamp/commit/fc2f6c81af2603743fb7c0746f21359f3bebf643))
+
 ## [2.2.1](https://github.com/jhleao/stamp/compare/v2.2.0...v2.2.1) (2026-08-25)
 
 
