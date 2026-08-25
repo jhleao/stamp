@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/jhleao/stamp/compare/v2.4.0...v2.4.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* refresh website styles safely ([dc7d0a9](https://github.com/jhleao/stamp/commit/dc7d0a95a001533acff3bb9ce556ee072db930ca))
+
 # [2.4.0](https://github.com/jhleao/stamp/compare/v2.3.0...v2.4.0) (2026-08-25)
 
 
