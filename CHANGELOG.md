@@ -1,3 +1,10 @@
+## [2.4.2](https://github.com/jhleao/stamp/compare/v2.4.1...v2.4.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* link website policies ([a6c2187](https://github.com/jhleao/stamp/commit/a6c2187099a24bf81d8f7e324f4897d791591df1))
+
 ## [2.4.1](https://github.com/jhleao/stamp/compare/v2.4.0...v2.4.1) (2026-08-25)
 
 
