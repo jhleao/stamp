@@ -26,9 +26,9 @@ import (
 
 const defaultKeychainService = "sh.stamp.google-drive"
 
-const (
-	defaultClientID     = "REMOVED_GOOGLE_OAUTH_CLIENT_ID"
-	defaultClientSecret = "REMOVED_GOOGLE_OAUTH_CLIENT_SECRET"
+var (
+	DefaultOAuthClientID     string
+	DefaultOAuthClientSecret string
 )
 
 type CredentialSource string
@@ -396,9 +396,12 @@ func credentialFile() (OAuthFile, CredentialSource, string, error) {
 		file, err := readCredentialFile(path)
 		return file, CredentialInstalled, path, err
 	}
+	if DefaultOAuthClientID == "" || DefaultOAuthClientSecret == "" {
+		return OAuthFile{}, "", "", errors.New("Google OAuth is not configured in this build; run stamp setup with an OAuth configuration")
+	}
 	var file OAuthFile
-	file.Installed.ClientID = defaultClientID
-	file.Installed.ClientSecret = defaultClientSecret
+	file.Installed.ClientID = DefaultOAuthClientID
+	file.Installed.ClientSecret = DefaultOAuthClientSecret
 	file.Installed.AuthURI = "https://accounts.google.com/o/oauth2/auth"
 	file.Installed.TokenURI = "https://oauth2.googleapis.com/token"
 	return file, CredentialDefault, "built into stamp", nil

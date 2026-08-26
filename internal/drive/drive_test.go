@@ -20,18 +20,20 @@ func TestID(t *testing.T) {
 }
 
 func TestCredentialsUseBundledDefaultWithoutOverride(t *testing.T) {
+	setDefaultOAuthCredentials(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", "")
 	info, err := Credentials()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Source != CredentialDefault || info.ClientID != defaultClientID {
+	if info.Source != CredentialDefault || info.ClientID != DefaultOAuthClientID {
 		t.Fatalf("unexpected credentials: %+v", info)
 	}
 }
 
 func TestCredentialsPreferEnvironmentThenInstalledOverride(t *testing.T) {
+	setDefaultOAuthCredentials(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	environment := filepath.Join(t.TempDir(), "environment.json")
@@ -61,6 +63,15 @@ func TestCredentialsPreferEnvironmentThenInstalledOverride(t *testing.T) {
 	if err != nil || info.Source != CredentialDefault {
 		t.Fatalf("reset credentials = %+v, %v", info, err)
 	}
+}
+
+func setDefaultOAuthCredentials(t *testing.T) {
+	t.Helper()
+	oldID, oldSecret := DefaultOAuthClientID, DefaultOAuthClientSecret
+	DefaultOAuthClientID, DefaultOAuthClientSecret = "default-client", "default-secret"
+	t.Cleanup(func() {
+		DefaultOAuthClientID, DefaultOAuthClientSecret = oldID, oldSecret
+	})
 }
 
 func TestInstallConfig(t *testing.T) {

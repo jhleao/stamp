@@ -7,6 +7,24 @@ if [[ -z "$version" ]]; then
   exit 2
 fi
 
+required_google_variables=(
+  GOOGLE_OAUTH_CLIENT_ID
+  GOOGLE_OAUTH_CLIENT_SECRET
+  GOOGLE_PICKER_API_KEY
+)
+for variable in "${required_google_variables[@]}"; do
+  if [[ -z "${!variable:-}" ]]; then
+    echo "missing $variable; refusing to publish a release without Google credentials" >&2
+    exit 1
+  fi
+done
+
+google_ldflags=(
+  "-X github.com/jhleao/stamp/internal/drive.DefaultOAuthClientID=$GOOGLE_OAUTH_CLIENT_ID"
+  "-X github.com/jhleao/stamp/internal/drive.DefaultOAuthClientSecret=$GOOGLE_OAUTH_CLIENT_SECRET"
+  "-X github.com/jhleao/stamp/internal/drive.DefaultPickerAPIKey=$GOOGLE_PICKER_API_KEY"
+)
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_dir="$repo_root/dist"
 rm -rf "$release_dir"
@@ -30,7 +48,7 @@ for target in "${targets[@]}"; do
   [[ "$os" == "windows" ]] && binary="stamp.exe"
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
     -trimpath \
-    -ldflags "-s -w -X main.version=$version" \
+    -ldflags "-s -w -X main.version=$version ${google_ldflags[*]}" \
     -o "$stage/$binary" \
     "$repo_root/cmd/stamp"
   cp "$repo_root/README.md" "$stage/README.md"

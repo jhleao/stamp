@@ -17,8 +17,7 @@ import (
 const pickerAppID = "174648149574"
 const pickerAddress = "127.0.0.1:57184"
 
-// DefaultPickerAPIKey is public browser configuration, not a secret.
-var DefaultPickerAPIKey = "REMOVED_GOOGLE_PICKER_API_KEY"
+var DefaultPickerAPIKey string
 
 // PickFolder asks the signed-in user to select a shared Stamp project folder or
 // its canonical archive. Selecting the archive is the drive.file escape hatch
