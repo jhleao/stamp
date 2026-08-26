@@ -1,6 +1,8 @@
+<p align="center"><img src="website/assets/stamp-logo-pixel.png" width="220" alt="Stamp logo"></p>
+
 # Stamp
 
-Stamp turns Markdown, TSX components, and Tailwind themes into polished PDFs.
+Stamp turns Markdown, TSX components, and Tailwind themes into visually in-brand documents.
 Projects are ordinary folders; Google Drive stores the shared revision; Studio
 is a focused local editor.
 
