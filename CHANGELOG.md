@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/jhleao/stamp/compare/v3.0.0...v3.0.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* inject Google credentials at release time ([d57b03a](https://github.com/jhleao/stamp/commit/d57b03aae78ec9ef3ce45ea659c708ca2cadd191))
+
 # [3.0.0](https://github.com/jhleao/stamp/compare/v2.5.0...v3.0.0) (2026-08-26)
 
 
