@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/jhleao/stamp/compare/v2.4.3...v2.5.0) (2026-08-26)
+
+
+### Features
+
+* add final Stamp identity ([4b5cd80](https://github.com/jhleao/stamp/commit/4b5cd804b206662d2dcd79192bc3120425eb59dc))
+
 ## [2.4.3](https://github.com/jhleao/stamp/compare/v2.4.2...v2.4.3) (2026-08-25)
 
 
