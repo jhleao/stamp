@@ -4,7 +4,7 @@ import { languageForPath, tailwindToken } from "./editor-support";
 describe("editor language selection", () => {
   it.each([
     ["theme/page.html.tmpl", "html"],
-    ["theme/components/card.tsx", "typescript"],
+    ["theme/components/Card.tsx", "typescript"],
     ["theme/tailwind.css", "css"],
     ["stamp.json", "json"],
     ["documents/report.page.md", "stamp"],

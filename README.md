@@ -6,6 +6,8 @@ Stamp turns Markdown, TSX components, and Tailwind themes into visually in-brand
 Projects are ordinary folders; Google Drive stores the shared revision; Studio
 is a focused local editor.
 
+<p align="center"><img src="website/assets/studio-document.png" width="920" alt="Stamp Studio editing a branded document with its live preview"></p>
+
 ## Install
 
 Install with Homebrew, then let Stamp prepare the authoring tools and Google

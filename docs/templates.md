@@ -11,11 +11,15 @@ design system, reusable components, and realistic examples. Generated CSS is
 hidden. Selecting any template file previews the matching example
 automatically. Use the `+` beside Components to create a new shared component.
 
-A theme is a folder you can copy, hand to an agent, or snapshot into a project.
-It has no install step, package manager, or live dependency.
+A theme is part of its project and travels with it. It has no separate install
+step, package manager, registry, or live dependency.
+
+Component filenames and Markdown tags use PascalCase: `MetricCard.tsx` is
+invoked as `<MetricCard>`. The filename, exported function, and tag should
+share the same name.
 
 ```text
-my-theme/
+theme/
   page.html.tmpl       # outer frame for written pages
   tailwind.css          # tokens and print primitives
   page.css              # generated; never hand-edit
@@ -25,7 +29,6 @@ my-theme/
   examples/            # realistic visual tests
   assets/
   fonts/
-  outputs/              # generated project previews
 ```
 
 Every project owns this folder. Edit components, examples, assets, and Tailwind
@@ -44,12 +47,12 @@ period: Q3
 
 # Quarter at a glance
 
-<metric-card value="$4.2M" change="18%">
+<MetricCard value="$4.2M" change="18%">
 Annual recurring revenue
-</metric-card>
+</MetricCard>
 ```
 
-The appearance lives in `components/metric-card.tsx`, using Tailwind
+The appearance lives in `components/MetricCard.tsx`, using Tailwind
 utilities:
 
 ```tsx
@@ -60,7 +63,9 @@ export const metadata = {
 
 export default function MetricCard({ props, children }) {
   return (
-    <figure className="grid grid-cols-[1fr_auto] gap-3 border-y border-zinc-300 py-5">
+    <figure
+      className="grid grid-cols-[1fr_auto] gap-3 border-y border-zinc-300 py-5"
+    >
       <strong className="text-4xl tracking-tight">{props.value}</strong>
       <span className="text-sm text-zinc-500">{props.change}</span>
       <figcaption className="col-span-2 text-sm">{children}</figcaption>
@@ -102,9 +107,9 @@ reviewable, and safe to share through Drive.
 
 ## A good agent request
 
-> Open this Stamp project's theme. Make the examples look like our brand, create reusable
-> components for repeated patterns, add a dense and a long-content example,
-> then inspect every result in Studio. Keep document Markdown about
-> content, not layout.
+> Open this Stamp project's theme. Make the examples look like our brand,
+> create reusable components for repeated patterns, add a dense and a
+> long-content example, then inspect every result in Studio. Keep document
+> Markdown about content, not layout.
 
 The generated `README.md` inside every theme gives an agent the same contract.

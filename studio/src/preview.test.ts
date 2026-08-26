@@ -20,14 +20,14 @@ describe("previewURL", () => {
   });
 
   it("keeps isolated components on their HTML preview", () => {
-    expect(previewURL(file({ component: "metric-card" }), null, 2)).toBe(
-      "api/component-preview?name=metric-card&at=2",
+    expect(previewURL(file({ component: "MetricCard" }), null, 2)).toBe(
+      "api/component-preview?name=MetricCard&at=2",
     );
   });
 
   it("adds component prop overrides without affecting document previews", () => {
-    expect(previewURL(file({ component: "band" }), null, 2, { full: "true", no: "03" })).toBe(
-      "api/component-preview?name=band&at=2&prop.full=true&prop.no=03",
+    expect(previewURL(file({ component: "Band" }), null, 2, { full: "true", no: "03" })).toBe(
+      "api/component-preview?name=Band&at=2&prop.full=true&prop.no=03",
     );
   });
 
@@ -39,6 +39,6 @@ describe("previewURL", () => {
     expect(usesPdfCanvas(file(), "documents/report.page.md")).toBe(true);
     expect(usesPdfCanvas(file({ path: "decks/talk.deck.md" }), "decks/talk.deck.md")).toBe(true);
     expect(usesPdfCanvas(file({ path: "spreadsheets/model.xlsx" }), "spreadsheets/model.xlsx")).toBe(false);
-    expect(usesPdfCanvas(file({ component: "metric-card" }), "theme/examples/report.page.md")).toBe(false);
+    expect(usesPdfCanvas(file({ component: "MetricCard" }), "theme/examples/report.page.md")).toBe(false);
   });
 });

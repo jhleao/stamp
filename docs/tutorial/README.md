@@ -1,7 +1,8 @@
 # Stamp quick-start video
 
-`stamp-tutorial.mp4` walks from first-time installation through theme creation,
-content editing, coding-agent help, sharing, and conflict-safe collaboration.
+`stamp-tutorial.mp4` walks from first-time installation through project theme
+customization, content editing, coding-agent help, sharing, and conflict-safe
+collaboration.
 
 Rebuild it after changing the product flow:
 

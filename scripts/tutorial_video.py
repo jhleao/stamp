@@ -31,7 +31,7 @@ SCENES = [
     {
         "eyebrow": "1 · SET UP ONCE",
         "title": "Install the renderer wheels",
-        "code": "brew install go node pandoc libreoffice\nbrew install --cask google-chrome\nnpm install -g @tailwindcss/cli\nnpm install && make install",
+        "code": "# Install a binary from github.com/jhleao/stamp/releases\nstamp doctor\n# Source contributors: npm ci && make install",
         "body": "The installed app is one binary. Tailwind is only needed while\nauthoring themes; the shared project contains inert compiled CSS.",
         "narration": "First, install Stamp and its rendering and authoring tools. The installed Stamp app is one binary. Chrome produces PDFs, LibreOffice handles spreadsheets and presentation files, Pandoc supports document compatibility, and Tailwind compiles themes into inert local CSS.",
     },
@@ -51,17 +51,17 @@ SCENES = [
     },
     {
         "eyebrow": "4 · LET THE AGENT SHAPE IT",
-        "title": "Point your coding agent\nat the project folder",
-        "body": "“Match our brand. Add reusable components and stress-test\nexamples. Preview every result before you finish.”",
+        "title": "Start an agent session\nfrom Studio",
+        "body": "The robot button copies the workspace path and asks the\nagent to run stamp skill before editing.",
         "code": "stamp new board-pack \\\n+  --name 'Board Pack'\ncd board-pack && stamp studio",
-        "narration": "Point a coding agent at the project folder and describe the result you want. Ask it to match your brand, add reusable components, create stress test examples, and inspect every preview. The theme stays inside the project alongside its content.",
+        "narration": "Open Studio and use the robot button to copy a ready-to-paste agent prompt. It includes the workspace path and asks the agent to run Stamp skill before editing. Then describe the result you want: match the brand, reuse existing components, add stress test examples, and inspect every affected preview.",
     },
     {
         "eyebrow": "5 · WRITE BESIDE THE RESULT",
         "title": "Content stays readable",
         "image": "studio.png",
         "body": "Studio opens real content immediately. Monaco helps with\nMarkdown, HTML, formatting, and Tailwind utility classes.",
-        "narration": "Studio opens a real starter document immediately, with source on the left and the output on the right. Monaco helps with Markdown, HTML, formatting, and Tailwind utility classes. Stamp saves locally as you type. Edits made by your coding agent appear here automatically too. Components keep layout out of the prose, so a document remains easy to read and hand to someone else.",
+        "narration": "Studio opens a real starter document immediately, with source on the left and the output on the right. Monaco helps with Markdown, TSX, HTML, formatting, and Tailwind utility classes. Save deliberately when a draft is ready to render. Edits made by your coding agent appear automatically when the editor is idle and never overwrite an active draft. Components keep layout out of the prose, so a document remains easy to read and hand to someone else.",
     },
     {
         "eyebrow": "6 · SHARE A VERSION",
@@ -75,7 +75,7 @@ SCENES = [
         "title": "Pull when an update is ready",
         "code": "stamp clone board-pack\nstamp studio\n# Later: Pull lights up when Drive is newer\nstamp push --message 'tighten the narrative'",
         "body": "If local and shared work both changed, Stamp keeps a recovery\ncopy and asks before replacing. Nothing is silently discarded.",
-        "narration": "A teammate opens the Drive link once and already has the latest version. On later visits, Pull lights up when Drive is newer. They edit, preview, and push again. If local work and Drive both changed, Stamp stops and makes a recovery copy before replacement. That is the complete collaboration model: ordinary files locally, and deliberate, recoverable versions in Drive.",
+        "narration": "A teammate runs Stamp clone and explicitly chooses the shared project in Google Picker. On later visits, Pull lights up when Drive is newer. They edit, preview, and push again. If local work and Drive both changed, Stamp stops and makes a recovery copy before replacement. That is the complete collaboration model: ordinary files locally, and deliberate, recoverable versions in Drive.",
     },
     {
         "eyebrow": "THAT’S STAMP",

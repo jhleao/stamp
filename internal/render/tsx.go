@@ -19,6 +19,8 @@ import (
 const componentRuntime = `
 const Fragment = Symbol("Fragment");
 const raw = value => ({ __stampRaw: String(value ?? "") });
+let activeMeta = {};
+let activeFormat = "";
 const h = (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) });
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 const attrName = name => ({className:"class", htmlFor:"for"})[name] || name.replace(/[A-Z]/g, letter => "-" + letter.toLowerCase());
@@ -39,8 +41,19 @@ const renderNode = node => {
   const body = node.props?.dangerouslySetInnerHTML?.__html ?? renderNode(node.children);
   return "<" + node.type + attrs + ">" + body + "</" + node.type + ">";
 };
-const __stampRender = (component, props, meta, format, children) =>
-  renderNode(component({props, meta, format, children: raw(children)}));
+const __stampDefineComponent = (name, component) => {
+  globalThis[name] = input => component({
+    props: input || {},
+    meta: activeMeta,
+    format: activeFormat,
+    children: input?.children || []
+  });
+};
+const __stampRender = (component, props, meta, format, children) => {
+  activeMeta = meta;
+  activeFormat = format;
+  return renderNode(component({props, meta, format, children: raw(children)}));
+};
 `
 
 type compiledComponent struct {
@@ -104,7 +117,7 @@ func loadComponentProgram(root string) (*componentProgram, error) {
 		}
 		tag := strings.TrimSuffix(name, ".tsx")
 		if !validComponentName(tag) {
-			return nil, fmt.Errorf("component %s must use a lowercase HTML tag name", name)
+			return nil, fmt.Errorf("component %s must use a PascalCase name such as MetricCard", name)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
@@ -184,6 +197,10 @@ func (program *componentProgram) newRenderer() (*componentRenderer, error) {
 	if !ok {
 		return nil, errors.New("component runtime did not initialize")
 	}
+	defineComponent, ok := goja.AssertFunction(runtime.Get("__stampDefineComponent"))
+	if !ok {
+		return nil, errors.New("component runtime did not initialize")
+	}
 	result := &componentRenderer{
 		runtime: runtime, render: render,
 		components: make(map[string]goja.Value, len(program.components)),
@@ -203,7 +220,14 @@ func (program *componentProgram) newRenderer() (*componentRenderer, error) {
 		if _, ok := goja.AssertFunction(fn); !ok {
 			return nil, fmt.Errorf("component %s must export a default function", component.name)
 		}
-		result.components[component.name] = fn
+		if _, err := defineComponent(goja.Undefined(), runtime.ToValue(component.name), fn); err != nil {
+			return nil, fmt.Errorf("component %s: %w", component.name, err)
+		}
+		key := strings.ToLower(component.name)
+		if _, exists := result.components[key]; exists {
+			return nil, fmt.Errorf("component name %s conflicts with another component", component.name)
+		}
+		result.components[key] = fn
 		info := ComponentInfo{Name: component.name}
 		if metadata := module.Get("metadata"); metadata != nil && !goja.IsUndefined(metadata) && !goja.IsNull(metadata) {
 			object := metadata.ToObject(runtime)
@@ -241,12 +265,12 @@ func ComponentCatalog(root string) ([]ComponentInfo, error) {
 }
 
 func (renderer *componentRenderer) has(name string) bool {
-	_, ok := renderer.components[name]
+	_, ok := renderer.components[strings.ToLower(name)]
 	return ok
 }
 
 func (renderer *componentRenderer) renderComponent(name string, view componentData) (string, error) {
-	component, ok := renderer.components[name]
+	component, ok := renderer.components[strings.ToLower(name)]
 	if !ok {
 		return "", fmt.Errorf("unknown component %s", name)
 	}

@@ -35,7 +35,7 @@ func TestCompileTailwind(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(theme, "tailwind.css"), []byte("@import \"tailwindcss\" source(\"./\");\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(theme, "components", "card.tsx"), []byte(`export default function Card({ children }) { return <div className="grid gap-7">{children}</div>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(theme, "components", "Card.tsx"), []byte(`export default function Card({ children }) { return <div className="grid gap-7">{children}</div>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	binary, err := filepath.Abs(filepath.Join("..", "..", "node_modules", ".bin", "tailwindcss"))
@@ -56,14 +56,14 @@ func TestCreateComponent(t *testing.T) {
 	root := t.TempDir()
 	server := &Server{root: root, clients: map[chan string]struct{}{}}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest("POST", "/api/components", strings.NewReader(`{"name":"metric-card"}`))
+	request := httptest.NewRequest("POST", "/api/components", strings.NewReader(`{"name":"MetricCard"}`))
 	server.createComponent(recorder, request)
 	if recorder.Code != 200 {
 		t.Fatalf("createComponent status = %d: %s", recorder.Code, recorder.Body.String())
 	}
-	path := filepath.Join(root, "theme", "components", "metric-card.tsx")
+	path := filepath.Join(root, "theme", "components", "MetricCard.tsx")
 	data, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(data), `className="metric-card my-6`) || !strings.Contains(string(data), `props.label`) {
+	if err != nil || !strings.Contains(string(data), `className="my-6`) || !strings.Contains(string(data), `props.label`) {
 		t.Fatalf("component = %q, %v", data, err)
 	}
 }
@@ -269,7 +269,7 @@ func TestDecorateFilesSeparatesContentAndTemplates(t *testing.T) {
 		{Path: "theme/examples/example.page.md", Previewable: true},
 		{Path: "theme/page.css", Editable: true},
 		{Path: "theme/page.html.tmpl", Editable: true},
-		{Path: "theme/components/callout.tsx", Editable: true},
+		{Path: "theme/components/Callout.tsx", Editable: true},
 	}
 	decorateFiles(files)
 	if files[0].Section != "content" || files[0].Template != "Page template" {
@@ -280,7 +280,7 @@ func TestDecorateFilesSeparatesContentAndTemplates(t *testing.T) {
 			t.Fatalf("template metadata = %#v", files[index])
 		}
 	}
-	if files[4].PreviewPath != "" || files[4].Component != "callout" {
+	if files[4].PreviewPath != "" || files[4].Component != "Callout" {
 		t.Fatalf("component should have an isolated preview: %#v", files[4])
 	}
 	if files[2].Label != "Styles" || files[3].Label != "Structure" || files[4].Group != "Components" {
@@ -308,7 +308,7 @@ func TestTailwindClassesIncludeProjectUtilitiesAndTokens(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "theme", "components"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "theme", "components", "card.tsx"), []byte(`export default function Card({ children }) { return <article className="grid gap-7 bg-brand">{children}</article>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "theme", "components", "Card.tsx"), []byte(`export default function Card({ children }) { return <article className="grid gap-7 bg-brand">{children}</article>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "theme", "tailwind.css"), []byte(`@theme { --color-brand: oklch(.5 .1 20); --font-editorial: Georgia; }`), 0o644); err != nil {

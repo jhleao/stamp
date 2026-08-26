@@ -440,13 +440,39 @@ func validateOutput(data []byte, baseURL string) error {
 	return visit(document)
 }
 
-var componentPropPattern = regexp.MustCompile(`\bprops\.([A-Za-z][A-Za-z0-9_-]*)`)
+var componentPropPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\bprops\s*\??\.\s*([A-Za-z][A-Za-z0-9_]*)`),
+	regexp.MustCompile(`\bprops\s*\??\[\s*["']([A-Za-z][A-Za-z0-9_-]*)["']\s*\]`),
+}
+var componentPropDestructurePattern = regexp.MustCompile(`(?s)\b(?:const|let|var)\s*\{([^{}]*)\}\s*(?::[^=;\n]+)?=\s*props\b`)
 var componentPropName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
+func componentPropNames(template []byte) []string {
+	names := map[string]bool{}
+	for _, pattern := range componentPropPatterns {
+		for _, match := range pattern.FindAllSubmatch(template, -1) {
+			names[string(match[1])] = true
+		}
+	}
+	for _, match := range componentPropDestructurePattern.FindAllSubmatch(template, -1) {
+		for _, member := range bytes.Split(match[1], []byte(",")) {
+			key := strings.TrimSpace(strings.SplitN(string(member), ":", 2)[0])
+			key = strings.TrimSpace(strings.SplitN(key, "=", 2)[0])
+			if componentPropName.MatchString(key) {
+				names[key] = true
+			}
+		}
+	}
+	values := make(map[string]string, len(names))
+	for name := range names {
+		values[name] = ""
+	}
+	return sortedKeys(values)
+}
 
 func componentPreviewProps(template []byte) map[string]string {
 	values := map[string]string{}
-	for _, match := range componentPropPattern.FindAllSubmatch(template, -1) {
-		key := string(match[1])
+	for _, key := range componentPropNames(template) {
 		switch strings.ToLower(key) {
 		case "value", "metric", "score", "rating":
 			values[key] = "94%"
@@ -486,22 +512,22 @@ func sortedKeys(values map[string]string) []string {
 
 func componentPreviewContent(name string) string {
 	switch name {
-	case "columns":
+	case "Columns":
 		return `<div><strong>First idea</strong><p>A concise supporting thought.</p></div><div><strong>Second idea</strong><p>Another useful point.</p></div><div><strong>Third idea</strong><p>A final useful point.</p></div>`
-	case "band":
+	case "Band":
 		return `<h2>Proof where it counts</h2>`
-	case "figures":
+	case "Figures":
 		return `<div><strong>62%</strong><p>First signal</p></div><div><strong>38%</strong><p>Second signal</p></div>`
-	case "cover", "section-cover":
+	case "Cover", "SectionCover":
 		return `<h1>Make the important thing clear.</h1><p>A short, useful line of context.</p>`
-	case "customers":
+	case "Customers":
 		return `<span>Northstar</span><span>Fieldwork</span><span>Daylight</span>`
 	default:
 		return `<h3>Component preview</h3><p>Representative content shows spacing, type, color, and behavior.</p>`
 	}
 }
 
-// renderComponents expands custom tags backed by theme/components/<tag>.tsx.
+// renderComponents expands custom tags backed by theme/components/<PascalCaseName>.tsx.
 // Unknown tags remain ordinary HTML, so a theme can still use lightweight CSS-only
 // primitives. Components receive props, children, document meta, and format
 // ("page", "deck", or "component" for an isolated preview).
@@ -611,11 +637,11 @@ func (program *componentProgram) closeSelfClosingTags(source string) string {
 }
 
 func validComponentName(name string) bool {
-	if name == "" || name[0] < 'a' || name[0] > 'z' {
+	if name == "" || name[0] < 'A' || name[0] > 'Z' {
 		return false
 	}
 	for _, char := range name {
-		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (char < '0' || char > '9') {
 			return false
 		}
 	}

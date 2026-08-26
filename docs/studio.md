@@ -43,8 +43,8 @@ class attributes, built-in formatting, and normal editor keyboard shortcuts.
 The minimap and developer-heavy chrome stay hidden. Vite and
 Tailwind are build-time authoring tools; Go embeds the compiled interface.
 
-Stamp recompiles `tailwind.css` whenever theme sources change, whether the
-change came from Studio, a coding agent, or the CLI preview flow. Generated
+Stamp recompiles `tailwind.css` whenever rendering encounters newer theme
+sources, whether the change came from Studio or a coding agent. Generated
 `page.css` and `deck.css` remain hidden and should never be hand-edited.
 
 Studio is not a WYSIWYG layout tool, AI chat client, or cloud collaboration

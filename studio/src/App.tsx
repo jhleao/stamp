@@ -229,7 +229,7 @@ function FileList({ onSelect, onCreateComponent, actions }: { onSelect: (event: 
             setCreating(false);
           }
         }}>
-          <input autoFocus value={name} pattern="[a-z][a-z0-9-]*" placeholder="metric-card" aria-label="Component name" onInput={(event) => setName(event.currentTarget.value.toLowerCase().replace(/\s+/g, "-"))} />
+          <input autoFocus value={name} pattern="[A-Z][A-Za-z0-9]*" placeholder="MetricCard" aria-label="Component name" onInput={(event) => setName(event.currentTarget.value)} />
           <button type="submit">Add</button>
           <button type="button" onClick={() => setCreating(false)}>Cancel</button>
         </form>}

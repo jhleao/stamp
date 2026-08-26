@@ -47,7 +47,7 @@ func TestStarterIsBrandNeutral(t *testing.T) {
 		"theme/page.html.tmpl",
 		"theme/deck.html.tmpl",
 		"theme/tailwind.css",
-		"theme/components/callout.tsx",
+		"theme/components/Callout.tsx",
 		"theme/examples/welcome-page.page.md",
 		"theme/examples/welcome-deck.deck.md",
 	} {

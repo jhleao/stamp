@@ -43,7 +43,6 @@ type CredentialInfo struct {
 	Source   CredentialSource
 	Path     string
 	ClientID string
-	Scope    string
 }
 
 type Client struct {
@@ -124,7 +123,7 @@ func Credentials() (CredentialInfo, error) {
 	if err != nil {
 		return CredentialInfo{}, err
 	}
-	return CredentialInfo{Source: source, Path: path, ClientID: file.Installed.ClientID, Scope: drive.DriveFileScope}, nil
+	return CredentialInfo{Source: source, Path: path, ClientID: file.Installed.ClientID}, nil
 }
 
 func Login(ctx context.Context) (string, error) {

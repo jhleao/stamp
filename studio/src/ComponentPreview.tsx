@@ -2,9 +2,24 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 
 export interface ComponentControl { name: string; value: string; boolean: boolean }
 
+const propName = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+export function componentPropNames(source: string): string[] {
+  const names = [
+    ...[...source.matchAll(/\bprops\s*\??\.\s*([A-Za-z][A-Za-z0-9_]*)/g)].map((match) => match[1]),
+    ...[...source.matchAll(/\bprops\s*\??\[\s*["']([A-Za-z][A-Za-z0-9_-]*)["']\s*\]/g)].map((match) => match[1]),
+  ];
+  for (const match of source.matchAll(/\b(?:const|let|var)\s*\{([^{}]*)\}\s*(?::[^=;\n]+)?=\s*props\b/g)) {
+    for (const member of match[1].split(",")) {
+      const key = member.trim().split(/[:=]/, 1)[0].trim();
+      if (!key.startsWith("...") && propName.test(key)) names.push(key);
+    }
+  }
+  return [...new Set(names)].sort();
+}
+
 export function componentControls(source: string): ComponentControl[] {
-  const names = [...source.matchAll(/\bprops\.([A-Za-z][A-Za-z0-9_-]*)/g)].map((match) => match[1]);
-  return [...new Set(names)].sort().map((name) => ({
+  return componentPropNames(source).map((name) => ({
     name,
     boolean: ["full", "compact", "inverse", "featured"].includes(name),
     value: name === "cols" ? "3"

@@ -2,22 +2,48 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Stamp helps technical and non-technical collaborators generate fully in-brand documents and slide decks.">
-  <meta name="theme-color" content="#f7f8fa"><title>Stamp</title>
-  <link rel="icon" href="/assets/favicon.png" type="image/png"><link rel="stylesheet" href="/assets/site.css?v=8">
+  <meta name="description" content="Stamp is a macOS application for creating, synchronizing, and sharing fully in-brand documents and slide decks through Google Drive.">
+  <meta name="application-name" content="Stamp"><meta property="og:site_name" content="Stamp"><meta property="og:title" content="Stamp">
+  <meta name="theme-color" content="#f7f8fa"><title>Stamp — In-brand documents and slide decks</title>
+  <link rel="icon" href="/assets/favicon.png" type="image/png"><link rel="stylesheet" href="/assets/site.css?v=21">
 </head>
 <body class="landing">
-  <a class="github-link" href="https://github.com/jhleao/stamp" aria-label="Stamp on GitHub"><img src="/assets/github.svg" alt=""></a>
   <main class="landing-main">
     <img class="landing-logo" src="/assets/stamp-logo-pixel.png" alt="Stamp logo">
     <h1>Stamp</h1>
     <div class="landing-copy">
       <p>Stamp helps technical and non-technical collaborators generate fully in-brand documents and slide decks.</p>
-      <p>Use Google Drive like a Git repository. Create your own template and components. Agent friendly.</p>
+      <p>Use Google Drive like a Git repository. Create your own components with Preact and Tailwind. Agent friendly.</p>
     </div>
-    <pre class="install-command"><code>&gt;brew install jhleao/tap/stamp
-&gt;stamp tutorial</code></pre>
+    <section class="studio-gallery" aria-labelledby="screenshots-title">
+      <p id="screenshots-title" class="studio-gallery-title">Screenshots:</p>
+      <div class="studio-thumbnails">
+        <button class="studio-open" type="button" aria-label="Enlarge the document editor screenshot" aria-haspopup="dialog" data-full="/assets/studio-document.png" data-alt="Stamp Studio showing a launch brief beside its rendered branded document">
+          <img src="/assets/studio-document.png" alt="Stamp Studio document editor" width="4410" height="2762">
+          <span class="studio-loupe" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></span>
+        </button>
+        <button class="studio-open" type="button" aria-label="Enlarge the Push dialog screenshot" aria-haspopup="dialog" data-full="/assets/studio-push.png" data-alt="Stamp Studio showing the Google Drive Push confirmation dialog">
+          <img src="/assets/studio-push.png" alt="Stamp Studio Push dialog" width="4408" height="2762">
+          <span class="studio-loupe" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></span>
+        </button>
+        <button class="studio-open" type="button" aria-label="Enlarge the component editor screenshot" aria-haspopup="dialog" data-full="/assets/studio-component.png?v=2" data-alt="Stamp Studio showing a Preact component beside its isolated preview">
+          <img src="/assets/studio-component.png?v=2" alt="Stamp Studio component editor" width="4422" height="2756">
+          <span class="studio-loupe" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></span>
+        </button>
+      </div>
+    </section>
+    <pre class="install-command"><code>&gt; brew install jhleao/tap/stamp
+&gt; stamp tutorial</code></pre>
+    <a class="github-link" href="https://github.com/jhleao/stamp" aria-label="Stamp on GitHub"><img src="/assets/github.svg" alt=""></a>
+    <p class="google-explanation">Stamp requests access only to the Google Drive files you select so it can clone and synchronize a Stamp project and update shared rendered documents. It cannot access unrelated Drive files.</p>
   </main>
   <footer class="landing-footer"><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/support/">Support</a></footer>
+  <dialog class="studio-dialog" aria-label="Stamp Studio screenshot">
+    <button class="studio-close" type="button" aria-label="Close screenshot">×</button>
+    <button class="studio-arrow studio-previous" type="button" aria-label="Previous screenshot">←</button>
+    <img src="/assets/studio-document.png" alt="Stamp Studio showing a launch brief beside its rendered branded document" width="4410" height="2762">
+    <button class="studio-arrow studio-next" type="button" aria-label="Next screenshot">→</button>
+  </dialog>
+  <script src="/assets/gallery.js" defer></script>
 </body>
 </html>

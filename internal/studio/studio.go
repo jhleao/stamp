@@ -83,7 +83,7 @@ type moveFilesRequest struct {
 	Destination string   `json:"destination"`
 }
 
-var componentName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var componentName = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 type syncStatus struct {
 	State         string `json:"state"`
@@ -866,9 +866,9 @@ func (s *Server) createComponent(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	request.Name = strings.TrimSpace(strings.ToLower(request.Name))
+	request.Name = strings.TrimSpace(request.Name)
 	if !componentName.MatchString(request.Name) {
-		s.writeError(w, errors.New("use a lowercase component name such as metric-card"), http.StatusBadRequest)
+		s.writeError(w, errors.New("use a PascalCase component name such as MetricCard"), http.StatusBadRequest)
 		return
 	}
 	rel := filepath.ToSlash(filepath.Join("theme", "components", request.Name+".tsx"))
@@ -893,9 +893,9 @@ func (s *Server) createComponent(w http.ResponseWriter, r *http.Request) {
   usage: "Explain when to use it and any important constraints."
 };
 
-export default function Component({ props, children }) {
+export default function ` + request.Name + `({ props, children }) {
   return (
-    <section className="` + request.Name + ` my-6 border-y border-stone-300 py-4 text-sm leading-relaxed">
+    <section className="my-6 border-y border-stone-300 py-4 text-sm leading-relaxed">
       {props.label && <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">{props.label}</p>}
       {children}
     </section>

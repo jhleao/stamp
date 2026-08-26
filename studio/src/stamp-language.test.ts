@@ -30,6 +30,7 @@ describe("Stamp language highlighting", () => {
     const types = tokenTypes('<MetricCard value="94%" className="grid gap-4">Hello</MetricCard>');
     expect(types).toContain("tag.component.stamp");
     expect(types).toContain("attribute.name.stamp");
+    expect(types).toContain("delimiter.equals.stamp");
     expect(types).toContain("string.attribute.stamp");
     expect(types).toContain("string.tailwind.stamp");
   });

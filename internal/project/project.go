@@ -143,7 +143,7 @@ func writeStarterTheme(root string) error {
 		{"page.html.tmpl", pageTemplate},
 		{"deck.html.tmpl", deckTemplate},
 		{"tailwind.css", tailwindSource},
-		{"components/callout.tsx", `export const metadata = {
+		{"components/Callout.tsx", `export const metadata = {
   description: "A quiet aside for supporting information.",
   usage: "Use sparingly for context that should not interrupt the main narrative."
 };
@@ -157,7 +157,7 @@ export default function Callout({ children }) {
 }
 `},
 		{"README.md", themeGuide},
-		{"examples/welcome-page.page.md", "---\ntitle: Welcome\n---\n# Welcome\n\nThis is a new Stamp project.\n\n<callout>Change the words, components, or Tailwind theme and watch this preview update.</callout>\n"},
+		{"examples/welcome-page.page.md", "---\ntitle: Welcome\n---\n# Welcome\n\nThis is a new Stamp project.\n\n<Callout>Change the words, components, or Tailwind theme and watch this preview update.</Callout>\n"},
 		{"examples/welcome-deck.deck.md", "---\ntitle: Welcome deck\n---\n<slide>\n\n# Welcome\n\nA small deck made with Stamp.\n\n</slide>\n\n<slide>\n\n## One source, one preview\n\n- Edit ordinary files\n- Push one complete version\n\n</slide>\n"},
 	}
 	for _, file := range files {
@@ -454,14 +454,14 @@ A Stamp theme is Tailwind utility markup compiled to inert HTML and CSS:
 - page.html.tmpl and deck.html.tmpl wrap written pages and slide decks.
 - tailwind.css holds design tokens, shared rules, and print primitives.
 - page.css and deck.css are generated; never hand-edit them.
-- components/<tag>.tsx defines a reusable Markdown tag with familiar Preact-style JSX.
+- components/<PascalCaseName>.tsx defines a reusable Markdown component with familiar Preact-style JSX.
 - examples/ are the theme's visual test cases.
 
 Content stays readable:
 
-    <metric-card value="$4.2M">Up 18% year over year.</metric-card>
+    <MetricCard value="$4.2M">Up 18% year over year.</MetricCard>
 
-The matching components/metric-card.tsx can use:
+The matching components/MetricCard.tsx can use:
 
     export const metadata = {
       description: "A headline metric with a short supporting caption.",

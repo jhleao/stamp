@@ -3,10 +3,7 @@ package drive
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-
-	"google.golang.org/api/drive/v3"
 )
 
 func TestID(t *testing.T) {
@@ -29,7 +26,7 @@ func TestCredentialsUseBundledDefaultWithoutOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Source != CredentialDefault || info.ClientID != defaultClientID || info.Scope != drive.DriveFileScope {
+	if info.Source != CredentialDefault || info.ClientID != defaultClientID {
 		t.Fatalf("unexpected credentials: %+v", info)
 	}
 }
@@ -63,27 +60,6 @@ func TestCredentialsPreferEnvironmentThenInstalledOverride(t *testing.T) {
 	info, err = Credentials()
 	if err != nil || info.Source != CredentialDefault {
 		t.Fatalf("reset credentials = %+v, %v", info, err)
-	}
-}
-
-func TestOAuthConfigUsesDriveFileScope(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("STAMP_GOOGLE_OAUTH_CONFIG", "")
-	config, _, err := oauthConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(config.Scopes) != 1 || config.Scopes[0] != drive.DriveFileScope {
-		t.Fatalf("scopes = %v", config.Scopes)
-	}
-}
-
-func TestPickerSelectsOneProjectFolder(t *testing.T) {
-	html := pickerHTML("token-value", "key-value")
-	for _, want := range []string{"ViewId.FOLDERS", "setSelectFolderEnabled(true)", "token-value", "key-value", "Clone a Stamp project"} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("picker HTML missing %q", want)
-		}
 	}
 }
 

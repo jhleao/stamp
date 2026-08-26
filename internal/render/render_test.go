@@ -3,6 +3,7 @@ package render
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -48,10 +49,10 @@ func TestRenderComponents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("metric-card.tsx", `export default function MetricCard({ props, children, meta }) { return <figure className="metric"><strong>{props.value}</strong><figcaption>{children}</figcaption><small>{meta.period}</small></figure>; }`)
-	write("panel.tsx", `export default function Panel({ props, children }) { return <section><metric-card value={props.value}>{children}</metric-card></section>; }`)
+	write("MetricCard.tsx", `export default function MetricCard({ props, children, meta }) { return <figure className="metric"><strong>{props.value}</strong><figcaption>{children}</figcaption><small>{meta.period}</small></figure>; }`)
+	write("Panel.tsx", `export default function Panel({ props, children }) { return <section><MetricCard value={props.value}>{children}</MetricCard></section>; }`)
 
-	got, err := renderComponents(root, `<panel value="$4.2M"><em>Up 18%</em></panel>`, map[string]any{"period": "Q3"}, "page")
+	got, err := renderComponents(root, `<Panel value="$4.2M"><em>Up 18%</em></Panel>`, map[string]any{"period": "Q3"}, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,10 +75,10 @@ func TestRenderComponentsExposeFormatThroughNesting(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("card-frame.tsx", `export default function CardFrame({ children, format }) { return <article data-format={format}><panel>{children}</panel></article>; }`)
-	write("panel.tsx", `export default function Panel({ children, format }) { return <section className={format === "deck" ? "slide" : "sheet"}>{children}</section>; }`)
+	write("CardFrame.tsx", `export default function CardFrame({ children, format }) { return <article data-format={format}><Panel>{children}</Panel></article>; }`)
+	write("Panel.tsx", `export default function Panel({ children, format }) { return <section className={format === "deck" ? "slide" : "sheet"}>{children}</section>; }`)
 
-	got, err := renderComponents(root, `<card-frame>Context-aware</card-frame>`, nil, "deck")
+	got, err := renderComponents(root, `<CardFrame>Context-aware</CardFrame>`, nil, "deck")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +95,10 @@ func TestRenderComponentsRejectsEventAttributes(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "card.tsx"), []byte(`export default function Card({ children }) { return <div>{children}</div>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.tsx"), []byte(`export default function Card({ children }) { return <div>{children}</div>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := renderComponents(root, `<card onclick="bad()">No</card>`, nil, "page")
+	_, err := renderComponents(root, `<Card onclick="bad()">No</Card>`, nil, "page")
 	if err == nil || !strings.Contains(err.Error(), "event attribute") {
 		t.Fatalf("expected event attribute error, got %v", err)
 	}
@@ -123,10 +124,10 @@ func TestRenderSelfClosingComponent(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "page-break.tsx"), []byte(`export default function PageBreak() { return <hr className="page-break" />; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "PageBreak.tsx"), []byte(`export default function PageBreak() { return <hr className="page-break" />; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := renderComponents(root, `<p>Before</p><page-break /><p>After</p>`, nil, "page")
+	got, err := renderComponents(root, `<p>Before</p><PageBreak /><p>After</p>`, nil, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,10 +143,10 @@ func TestComponentCanRenderDataDrivenSVG(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := `export default function BarChart({ props, meta }) { return <svg viewBox="0 0 100 40" aria-label={props.label}>{meta.bars.map(width => <rect width={width} height="8" />)}</svg>; }`
-	if err := os.WriteFile(filepath.Join(dir, "bar-chart.tsx"), []byte(view), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "BarChart.tsx"), []byte(view), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := renderComponents(root, `<bar-chart label="Revenue trend" />`, map[string]any{"bars": []any{25, 50, 75}}, "page")
+	got, err := renderComponents(root, `<BarChart label="Revenue trend" />`, map[string]any{"bars": []any{25, 50, 75}}, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,14 +161,14 @@ func TestComponentHTMLAtRendersOnlySelectedComponent(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "callout.tsx"), []byte(`export default function Callout({ props, children }) { return <aside className="callout"><b>{props.label}</b>{children}</aside>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Callout.tsx"), []byte(`export default function Callout({ props, children }) { return <aside className="callout"><b>{props.label}</b>{children}</aside>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "theme", "page.css"), []byte(`.callout{padding:2rem}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := ComponentHTMLAt(root, "callout", "/files/")
+	got, err := ComponentHTMLAt(root, "Callout", "/files/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,14 +189,14 @@ func TestComponentHTMLAtUsesComponentFormat(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "card.tsx"), []byte(`export default function Card({ children, format }) { return <div data-format={format}>{children}</div>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.tsx"), []byte(`export default function Card({ children, format }) { return <div data-format={format}>{children}</div>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "theme", "page.css"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := ComponentHTMLAt(root, "card", "/files/")
+	got, err := ComponentHTMLAt(root, "Card", "/files/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,14 +211,14 @@ func TestComponentHTMLAtKeepsLocalFontFiles(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "card.tsx"), []byte(`export default function Card({ children }) { return <div>{children}</div>; }`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.tsx"), []byte(`export default function Card({ children }) { return <div>{children}</div>; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	css := `@font-face{font-family:Example;src:url(theme/fonts/example.ttf);font-weight:400}`
 	if err := os.WriteFile(filepath.Join(root, "theme", "page.css"), []byte(css), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ComponentHTMLAt(root, "card", "/files/")
+	got, err := ComponentHTMLAt(root, "Card", "/files/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,12 +234,12 @@ func TestComponentCatalogReadsOptionalMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	sources := map[string]string{
-		"card.tsx": `export const metadata = {
+		"Card.tsx": `export const metadata = {
 			description: "A decisive summary card.",
 			usage: "Use once per major conclusion."
 		};
 		export default function Card() { return <article />; }`,
-		"divider.tsx": `export default function Divider() { return <hr />; }`,
+		"Divider.tsx": `export default function Divider() { return <hr />; }`,
 	}
 	for name, source := range sources {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
@@ -249,8 +250,19 @@ func TestComponentCatalogReadsOptionalMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 2 || catalog[0] != (ComponentInfo{Name: "card", Description: "A decisive summary card.", Usage: "Use once per major conclusion."}) || catalog[1] != (ComponentInfo{Name: "divider"}) {
+	if len(catalog) != 2 || catalog[0] != (ComponentInfo{Name: "Card", Description: "A decisive summary card.", Usage: "Use once per major conclusion."}) || catalog[1] != (ComponentInfo{Name: "Divider"}) {
 		t.Fatalf("unexpected component catalog: %#v", catalog)
+	}
+}
+
+func TestComponentPropNamesDiscoversAccessAndDestructuring(t *testing.T) {
+	source := []byte(`
+		const { eyebrow, title: heading, subtitle = "Fallback", ...rest } = props;
+		return <div>{props.count}{props?.compact}{props["aria-label"]}</div>;
+	`)
+	want := []string{"aria-label", "compact", "count", "eyebrow", "subtitle", "title"}
+	if got := componentPropNames(source); !slices.Equal(got, want) {
+		t.Fatalf("componentPropNames() = %v, want %v", got, want)
 	}
 }
 
@@ -265,10 +277,10 @@ func TestTSXComponentRendersPropsChildrenAndConditions(t *testing.T) {
 			{props.label && <strong>{props.label}</strong>}{children}
 		</article>;
 	}`
-	if err := os.WriteFile(filepath.Join(dir, "card.tsx"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.tsx"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := renderComponents(root, `<card label="Signal"><em>Useful</em></card>`, map[string]any{}, "page")
+	got, err := renderComponents(root, `<Card label="Signal"><em>Useful</em></Card>`, map[string]any{}, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +297,7 @@ func TestComponentCompilationCacheTracksSourceChanges(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "card.tsx")
+	path := filepath.Join(dir, "Card.tsx")
 	write := func(label string) {
 		t.Helper()
 		source := `export default function Card() { return <div>` + label + `</div>; }`
@@ -294,12 +306,12 @@ func TestComponentCompilationCacheTracksSourceChanges(t *testing.T) {
 		}
 	}
 	write("First")
-	first, err := renderComponents(root, `<card />`, nil, "page")
+	first, err := renderComponents(root, `<Card />`, nil, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
 	write("Second")
-	second, err := renderComponents(root, `<card />`, nil, "page")
+	second, err := renderComponents(root, `<Card />`, nil, "page")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,10 +326,10 @@ func TestComponentsRequireTSX(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "card.html.tmpl"), []byte(`<div>old format</div>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.html.tmpl"), []byte(`<div>old format</div>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := renderComponents(root, `<card />`, nil, "page")
+	_, err := renderComponents(root, `<Card />`, nil, "page")
 	if err == nil || !strings.Contains(err.Error(), "rename it to .tsx") {
 		t.Fatalf("expected a useful TSX migration error, got %v", err)
 	}
@@ -332,10 +344,10 @@ func BenchmarkRenderComponents(b *testing.B) {
 	source := `export default function Card({ props, children }) {
 		return <article className="card"><strong>{props.label}</strong>{children}</article>;
 	}`
-	if err := os.WriteFile(filepath.Join(dir, "card.tsx"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Card.tsx"), []byte(source), 0o644); err != nil {
 		b.Fatal(err)
 	}
-	document := strings.Repeat(`<card label="Signal"><p>Useful context.</p></card>`, 40)
+	document := strings.Repeat(`<Card label="Signal"><p>Useful context.</p></Card>`, 40)
 	b.ResetTimer()
 	for range b.N {
 		if _, err := renderComponents(root, document, nil, "page"); err != nil {

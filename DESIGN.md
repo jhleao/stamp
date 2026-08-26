@@ -2,37 +2,37 @@
 
 ## Product
 
-Stamp helps a person or agent open a shared document project, edit ordinary
-files locally, see the result, and push a recoverable version to Google Drive.
+Stamp lets a person or coding agent clone a shared document project, edit
+ordinary local files, inspect exact output, and push a recoverable version to
+Google Drive. It produces written and slide PDFs plus XLSX workbooks.
 
-It produces:
-
-- written documents as PDF;
-- slide decks as PDF;
-- spreadsheets as XLSX.
-
-It runs on macOS and treats Google Drive as the collaboration surface.
+Stamp is a local macOS application. Google Drive supplies sharing and revision
+history; Stamp has no hosted document service.
 
 ## Vocabulary
 
-- **Space:** an initialized folder in My Drive or a Shared Drive.
-- **Project:** one canonical `.stamp` file plus visible current outputs.
-- **Workspace:** the expanded local copy of a project.
-- **Version:** a Google Drive revision of the canonical `.stamp` file.
-- **Lease:** the canonical file's immutable Drive content revision ID.
-- **Studio:** a local browser editor and preview, never a hosted service.
+- **Project:** the complete content, theme, assets, and generated outputs for
+  one body of work.
+- **Workspace:** a project's expanded local working copy.
+- **Version:** one complete pushed source archive and its rendered mirrors.
+- **Lease:** the immutable Drive content version observed by the workspace.
+- **Studio:** the local browser editor and preview surface.
+
+There is deliberately no separate space, repository, or theme lifecycle.
 
 ## Workflow
 
 ```text
-stamp project open <drive-url>
+stamp clone board-pack
+# Choose the shared project in Google Picker.
+cd board-pack
 stamp pull
 stamp studio
-stamp push --message "update the board pack"
+stamp push --message "Update the board pack"
 ```
 
-There is no distinction between save and publish. Local edits are private;
-every push is a complete, rendered, shared version.
+Local saves remain private. Push renders every supported source, then shares
+one complete version.
 
 ## Project contents
 
@@ -41,12 +41,15 @@ stamp.yaml
 documents/       # *.page.md and *.doc.md -> PDF
 decks/           # *.deck.md and *.fodp -> PDF
 spreadsheets/    # *.fods -> XLSX; *.xlsx is preserved directly
-theme/           # component sources, compiled theme assets, examples
+theme/           # TSX components, Tailwind, shells, examples, fonts
 assets/
-outputs/         # generated and included in the canonical archive
+outputs/         # generated locally; never hand-edit
+AGENTS.md
+CLAUDE.md         # symlink to AGENTS.md
 ```
 
-The Drive folder contains the canonical archive and disposable output mirrors:
+The Drive project contains a canonical source archive and disposable output
+mirrors:
 
 ```text
 Q3 Board Pack/
@@ -57,99 +60,84 @@ Q3 Board Pack/
     Operating Model.xlsx
 ```
 
-Drive revisions are project versions. Stamp does not build a version graph,
-lock server, database, release protocol, or per-file remote sync engine.
-Canonical revisions are retained using Drive's `keepForever` flag, within
-Drive's 200-revision limit for binary files.
+Generated outputs are uploaded separately from the source archive so rendering
+does not dirty the source lease. Deleted local sources remove their obsolete
+mirrors on the next Push.
 
 ## Conflict rules
 
-The local workspace records the canonical Drive file ID, head revision, and hash.
+The workspace records the canonical archive ID, observed Drive version, source
+hash, output IDs, and project-folder IDs in `.stamp/state.json`.
 
 - Pull replaces a clean workspace.
-- Pull refuses when both the workspace and Drive changed.
-- `pull --incoming` expands the remote version beside local work.
-- `pull --replace` first moves local work to a recovery directory.
-- Push refuses when the Drive version differs from the local lease.
-- There is no unqualified force push.
-- `push --force-with-lease <version>` proceeds only after observing that version.
+- Pull refuses when local and Drive sources both changed.
+- `pull --incoming` expands Drive's version under `.stamp/incoming/`.
+- `pull --replace` first saves the local project under `.stamp/recovery/`.
+- Push refuses when Drive moved beyond the observed lease.
+- `push --force-with-lease <version>` works only after explicit review of that
+  exact remote version.
 
-Drive does not provide a documented project-level atomic compare-and-swap. The
-lease is a strong warning, not a distributed lock. Drive revisions make the
-narrow simultaneous-push race recoverable. We will not add a coordination
-service unless real usage proves it necessary.
+Drive does not offer a project-level atomic compare-and-swap. The lease catches
+normal drift rather than pretending to be a distributed lock; Drive revisions
+keep a narrow simultaneous-push race recoverable.
 
 ## Rendering
 
-Use existing wheels:
+- Markdown is expanded through bounded TSX components.
+- Tailwind compiles the theme into ordinary local CSS.
+- Chromium renders HTML/CSS to PDF.
+- LibreOffice renders FODS, FODP, and spreadsheet previews.
+- Pandoc plus LibreOffice handles DOC.MD compatibility.
 
-- Markdown and bounded component templates for content composition;
-- Tailwind as the theme authoring system, compiled to ordinary local CSS before
-  a theme is packed or pushed;
-- Chromium for HTML/CSS to PDF;
-- LibreOffice for FODS to XLSX, FODP to PDF, and exact spreadsheet previews;
-- Pandoc plus LibreOffice for DOC.MD compatibility.
-
-Fast Studio previews may render HTML directly. Push always runs exact output
-rendering. FODS preview is debounced and queued through LibreOffice; Stamp never
-implements a spreadsheet layout or formula engine.
+TSX components execute in a restricted JavaScript runtime with no DOM, files,
+network, events, remote modules, or shell access. Their output is inert HTML
+styled by local CSS. Push always runs the complete renderer before modifying
+Drive; Studio uses those same generated PDFs for page and deck previews.
 
 ## Studio
 
-`stamp studio` binds a tokenized server to `127.0.0.1`. Its Preact, Signals,
-Vite, and Tailwind interface provides a file tree, a restrained Monaco editor,
-preview, diagnostics, conflicts, pull, and push. Agents remain external and use
-the ordinary CLI; Studio does not contain chat or collaboration primitives.
+`stamp studio` binds a tokenized server to `127.0.0.1:57183`. Its Preact,
+Signals, Vite, Tailwind, and Monaco interface provides a hierarchical file tree,
+source editor, preview, diagnostics, Pull, and Push. It watches external file
+changes without replacing an active draft. Agents remain external and use the
+ordinary filesystem and CLI.
 
 ## Theme authoring
 
-Content and presentation are different products inside one workspace:
+Every project owns one complete theme:
 
 ```text
 theme/
-  page.html.tmpl       # page shell
-  deck.html.tmpl       # deck shell
-  components/          # shared, named content primitives
-  examples/            # visual fixtures and stress tests
-  tailwind.css         # authoring source: tokens and print primitives
-  page.css             # generated Tailwind output; not hand-authored
-  deck.css             # generated Tailwind output; not hand-authored
+  page.html.tmpl
+  deck.html.tmpl
+  components/*.tsx
+  examples/
+  tailwind.css
+  page.css             # generated
+  deck.css             # generated
+  assets/
+  fonts/
 ```
 
-Template and component markup may use Tailwind utility classes. Stamp compiles
-the utilities into a static local stylesheet and embeds that stylesheet in the
-rendered artifact. Compilation is an authoring concern; previewing, sharing, and
-opening an already-built project must not fetch a CDN or execute a template's
-JavaScript.
-
-Preact belongs in Studio. Executing arbitrary TSX inside the document renderer
-would make templates code, weaken the security boundary, and require a
-JavaScript runtime in the standalone Go binary. If JSX authoring is added, it
-must compile into the same inert component bundle before the project is shared;
-raw TSX is never the canonical collaboration format.
+Markdown carries words and semantic component tags. TSX components carry
+reusable structure and Tailwind utilities. Components may use props, children,
+front matter, format-aware variants, nested components, arrays, conditions, and
+inline SVG. Component metadata tells people and agents when a primitive should
+be used. There is no standalone theme command, package, registry, or upgrade
+protocol.
 
 ## Agent surface
 
-`stamp skill` prints the canonical project instructions. Agents edit ordinary
-files and call the same CLI as people; there is no parallel agent protocol.
+`stamp skill` prints the canonical project instructions and the current
+component catalog. New and cloned workspaces contain `AGENTS.md`; `CLAUDE.md`
+points to it. Agents use the same Pull, edit, inspect, and Push flow as people.
+There is no MCP server or parallel agent API.
 
 ## Complexity budget
 
-Prefer the standard library and small, mature dependencies. One binary plus
-the renderer applications is the distribution. A little duplication is better
-than a framework. A direct function is better than a port, registry, provider,
-or generalized protocol used once.
+Prefer the standard library and small, mature dependencies. Keep the CLI
+Git-like: `new`, `clone`, `pull`, `push`, `studio`. A direct function is better
+than a provider framework used once.
 
-Do not build:
-
-- a second general-purpose template programming language;
-- automatic template upgrades;
-- a generic pipeline or storage plugin system;
-- automatic document or spreadsheet merging;
-- deterministic archives or byte parity machinery;
-- WYSIWYG layout editing;
-- real-time multi-user editing;
-- a hosted service;
-- abstractions justified only by possible future backends.
-
-The target is roughly 4,000-6,000 readable Go and browser lines. Less is better.
+Do not build speculative theme distribution, storage plugins, WYSIWYG layout,
+automatic document merging, real-time multi-cursor editing, or a hosted service.
