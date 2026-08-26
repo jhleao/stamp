@@ -1,3 +1,13 @@
+# [3.0.0](https://github.com/jhleao/stamp/compare/v2.5.0...v3.0.0) (2026-08-26)
+
+
+* feat!: make PascalCase the component contract ([f2615a0](https://github.com/jhleao/stamp/commit/f2615a024e84e24908b6fbdbb4ab1579ff416f27))
+
+
+### BREAKING CHANGES
+
+* Theme component filenames and Markdown tags must now use PascalCase names such as MetricCard.
+
 # [2.5.0](https://github.com/jhleao/stamp/compare/v2.4.3...v2.5.0) (2026-08-26)
 
 
