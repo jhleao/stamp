@@ -8,32 +8,18 @@ is a focused local editor.
 
 <p align="center"><img src="website/assets/studio-document.png" width="920" alt="Stamp Studio editing a branded document with its live preview"></p>
 
-## Install
-
-Install with Homebrew, then let Stamp prepare the authoring tools and Google
-Drive connection:
+## Quick start
 
 ```sh
 brew install jhleao/tap/stamp
 stamp setup
+stamp new quarterly --name "Quarterly update"
+cd quarterly
+stamp studio
 ```
 
-Without Homebrew, use the signed release installer:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/jhleao/stamp/main/scripts/install.sh | sh
-stamp setup
-```
-
-To build from a source checkout instead:
-
-```sh
-npm ci
-make install
-```
-
-`make install` builds the embedded Studio and installs Stamp to
-`$HOME/.local/bin`. Override `PREFIX` or `BINDIR` if needed.
+In Studio, click **Copy Agent Instructions** in the top-left. Paste the prompt
+into your agent of choice, then work away.
 
 ## Update
 
@@ -56,50 +42,6 @@ verifies it against the release's SHA-256 manifest, validates the embedded
 version, and atomically replaces the current binary. Self-update is intended
 for release binaries installed directly in a user-writable location such as
 `$HOME/.local/bin`; source builds should be rebuilt with `make install`.
-
-## Start
-
-```sh
-stamp new quarterly --name "Quarterly update"
-cd quarterly
-stamp studio
-```
-
-Open an existing project instead:
-
-```sh
-stamp clone quarterly
-# Choose the shared project in Google Drive.
-cd quarterly && stamp studio
-```
-
-Studio remembers projects it opens. Run `stamp studio` from anywhere to choose
-from those workspaces; missing or disconnected paths are removed automatically.
-
-## Daily loop
-
-```sh
-stamp pull
-# Edit and inspect in Studio
-stamp push --message "Update quarterly summary"
-```
-
-Every project contains its own complete `theme/`: TSX components, Tailwind,
-wrapper templates, assets, and visual examples. Edit it in Studio's Templates
-section; there is no separate theme installation or lifecycle.
-
-## Agents
-
-No MCP registration or separate skill installation is required:
-
-```sh
-stamp skill
-```
-
-New projects contain the same guide in `AGENTS.md` and a `CLAUDE.md` symlink for
-Claude Code. Agents edit ordinary files and use the CLI like everyone else.
-Studio's robot button copies a ready-to-paste agent prompt containing the
-workspace path and the instruction to run `stamp skill`.
 
 ## Commands
 
