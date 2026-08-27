@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jhleao/stamp/internal/bundle"
+	"github.com/jhleao/stamp/internal/diagnostic"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
@@ -58,12 +59,14 @@ const (
 )
 
 func Open(ctx context.Context, drive Drive, value, destination string) (Workspace, error) {
+	diagnostic.Log("collab", "clone.start", "selection", stampdrive.ID(value), "destination", destination)
 	item, err := drive.Get(ctx, stampdrive.ID(value))
 	if err != nil {
 		return Workspace{}, err
 	}
 	var canonical, folder stampdrive.Item
 	if item.Folder {
+		diagnostic.Log("collab", "clone.selection", "type", "folder", "file_id", item.ID, "can_edit", item.CanEdit)
 		folder = item
 		if !item.CanEdit {
 			return Workspace{}, errors.New("the selected Drive folder is read-only; ask its owner for Editor access")
@@ -77,6 +80,7 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 		}
 		canonical = found
 	} else {
+		diagnostic.Log("collab", "clone.selection", "type", "archive", "file_id", item.ID, "name", item.Name, "can_edit", item.CanEdit)
 		canonical = item
 		if len(item.Parents) == 0 {
 			return Workspace{}, errors.New("canonical project has no parent folder")
@@ -123,6 +127,7 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	if err != nil {
 		return Workspace{}, err
 	}
+	diagnostic.Log("collab", "clone.complete", "root", root, "version", state.BaseVersion, "files", len(hashes))
 	return Workspace{Root: root, State: state}, nil
 }
 
@@ -146,6 +151,7 @@ func unpackNewWorkspace(contents []byte, destination string) error {
 }
 
 func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string, error) {
+	diagnostic.Log("collab", "pull.start", "root", root, "mode", mode)
 	state, err := project.ReadState(root)
 	if err != nil {
 		return "", err
@@ -158,6 +164,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		return "", err
 	}
 	if remote.Version == state.BaseVersion {
+		diagnostic.Log("collab", "pull.current", "version", remote.Version)
 		return "Already up to date.", nil
 	}
 	hashes, err := project.FileHashes(root)
@@ -165,6 +172,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		return "", err
 	}
 	dirty := !same(hashes, state.Files)
+	diagnostic.Log("collab", "pull.compare", "local_version", state.BaseVersion, "remote_version", remote.Version, "local_changed", dirty)
 	contents, err := drive.Download(ctx, state.FileID)
 	if err != nil {
 		return "", err
@@ -183,6 +191,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), destination); err != nil {
 			return "", err
 		}
+		diagnostic.Log("collab", "pull.incoming", "destination", destination, "version", remote.Version)
 		return "Remote version expanded at " + destination, nil
 	}
 	if dirty && mode == PullReplace {
@@ -193,6 +202,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		if err := bundle.PackFile(root, recovery); err != nil {
 			return "", err
 		}
+		diagnostic.Log("collab", "pull.recovery", "archive", recovery)
 	}
 	if err := replaceWorkspace(root, contents); err != nil {
 		return "", err
@@ -208,6 +218,7 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 	if err := project.WriteState(root, state); err != nil {
 		return "", err
 	}
+	diagnostic.Log("collab", "pull.complete", "version", remote.Version, "files", len(hashes))
 	return "Pulled Drive version " + remote.Version, nil
 }
 
@@ -226,18 +237,23 @@ func renderProject(root string) error {
 }
 
 func push(ctx context.Context, drive Drive, root, parentID, message, forceLease string, renderWorkspace func(string) error) (project.RemoteState, error) {
+	diagnostic.Log("collab", "push.start", "root", root, "parent_id", parentID, "force_lease", forceLease != "")
 	manifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
+	renderDone := diagnostic.Start("render", "workspace", "root", root)
 	if err := renderWorkspace(root); err != nil {
+		renderDone(err)
 		return project.RemoteState{}, err
 	}
+	renderDone(nil)
 	state, err := project.ReadState(root)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
 	firstPush := state.FileID == ""
+	diagnostic.Log("collab", "push.state", "first_push", firstPush, "local_version", state.BaseVersion)
 	if firstPush {
 		if err := createRemote(ctx, drive, manifest, stampdrive.ID(parentID), &state); err != nil {
 			return project.RemoteState{}, err
@@ -250,6 +266,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 			return project.RemoteState{}, err
 		}
 		remoteVersion = remote.Version
+		diagnostic.Log("collab", "push.lease", "local_version", state.BaseVersion, "remote_version", remoteVersion, "forced", forceLease != "")
 		if err := checkLease(state.BaseVersion, remoteVersion, forceLease); err != nil {
 			return project.RemoteState{}, err
 		}
@@ -260,6 +277,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	if err := bundle.PackWith(root, &archive, map[string][]byte{".stamp/version.json": append(versionJSON, '\n')}); err != nil {
 		return project.RemoteState{}, err
 	}
+	diagnostic.Log("collab", "push.packed", "bytes", archive.Len(), "parent_version", remoteVersion)
 	var updated stampdrive.Item
 	if firstPush {
 		updated, err = drive.CreateFile(ctx, state.ProjectFolderID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()), map[string]string{"stamp_kind": "canonical", "stamp_id": manifest.ID})
@@ -284,6 +302,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	if err := syncOutputs(ctx, drive, root, state.CurrentFolderID); err != nil {
 		return state, fmt.Errorf("canonical version %s was pushed, but output mirrors need retrying: %w", state.BaseVersion, err)
 	}
+	diagnostic.Log("collab", "push.complete", "version", state.BaseVersion, "files", len(hashes))
 	return state, nil
 }
 
@@ -298,6 +317,7 @@ func checkLease(local, remote, forced string) error {
 }
 
 func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, parentID string, state *project.RemoteState) error {
+	diagnostic.Log("collab", "remote.create", "parent_id", parentID, "name", manifest.Name)
 	folder, err := drive.EnsureFolder(ctx, parentID, manifest.Name, map[string]string{"stamp_kind": "project", "stamp_id": manifest.ID})
 	if err != nil {
 		return err
@@ -311,6 +331,7 @@ func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, p
 }
 
 func syncOutputs(ctx context.Context, drive Drive, root, folderID string) error {
+	diagnostic.Log("collab", "outputs.sync_start", "folder_id", folderID)
 	if folderID == "" {
 		return errors.New("project has no Current folder")
 	}
@@ -338,8 +359,10 @@ func syncOutputs(ctx context.Context, drive Drive, root, folderID string) error 
 		}
 		mime := mimeFor(path)
 		if ok {
+			diagnostic.Log("collab", "outputs.update", "path", key, "file_id", item.ID, "bytes", len(data), "mime", mime)
 			_, err = drive.UpdateFile(ctx, item.ID, mime, bytes.NewReader(data))
 		} else {
+			diagnostic.Log("collab", "outputs.create", "path", key, "bytes", len(data), "mime", mime)
 			_, err = drive.CreateFile(ctx, folderID, strings.ReplaceAll(key, "/", " - "), mime, bytes.NewReader(data), map[string]string{"stamp_kind": "output", "stamp_path": key})
 		}
 		return err
@@ -352,11 +375,13 @@ func syncOutputs(ctx context.Context, drive Drive, root, folderID string) error 
 	}
 	for _, item := range items {
 		if path := item.Props["stamp_path"]; path != "" && !current[path] {
+			diagnostic.Log("collab", "outputs.delete", "path", path, "file_id", item.ID)
 			if err := drive.Trash(ctx, item.ID); err != nil {
 				return err
 			}
 		}
 	}
+	diagnostic.Log("collab", "outputs.sync_complete", "files", len(current), "remote_items", len(items))
 	return nil
 }
 

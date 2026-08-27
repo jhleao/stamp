@@ -1,5 +1,22 @@
 # Google Drive
 
+## Diagnose a sync problem
+
+Run the failing operation with the global verbose flag and capture stderr:
+
+```sh
+stamp --verbose clone 2>&1 | tee stamp-debug.log
+stamp --verbose pull 2>&1 | tee stamp-debug.log
+stamp --verbose push --message "Debugging sync" 2>&1 | tee stamp-debug.log
+```
+
+Verbose output includes each OAuth and Drive HTTP request, status code, Google
+request ID, duration, selected Drive object, lease comparison, rendered output,
+and mirror create/update/delete decision. It never records authorization
+headers, OAuth codes or tokens, API keys, query strings, or file contents.
+Filenames and Drive object IDs remain visible so collaborators can identify the
+failing operation; review those before sharing a log outside your team.
+
 `stamp setup` connects Google Drive during first-time setup. To reconnect or
 switch accounts later, sign in directly:
 

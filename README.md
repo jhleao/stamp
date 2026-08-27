@@ -60,6 +60,24 @@ stamp update [--check|--yes]
 stamp version
 ```
 
+## Diagnostics
+
+Add `--verbose` before any command to print sanitized production diagnostics
+to stderr. The log covers CLI lifecycle, Google OAuth and Picker, every Google
+Drive HTTP request and response, collaboration decisions, rendering, output
+mirroring, Studio startup, and updater traffic.
+
+```sh
+stamp --verbose clone 2>&1 | tee stamp-debug.log
+stamp --verbose pull 2>&1 | tee stamp-debug.log
+stamp --verbose push --message "Ready for review" 2>&1 | tee stamp-debug.log
+```
+
+`STAMP_VERBOSE=1` enables the same diagnostics. Authorization headers, OAuth
+codes and tokens, API keys, URL query strings, and file contents are omitted or
+redacted. Review filenames and Drive IDs before sharing a log outside your
+team.
+
 ## Uninstall
 
 ```sh

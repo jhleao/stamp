@@ -68,3 +68,10 @@ func TestParseArgsSeparatesValuesFlagsAndPositionals(t *testing.T) {
 		t.Fatalf("unexpected parse result: pos=%v values=%v flags=%v", pos, values, flags)
 	}
 }
+
+func TestVerboseIsGlobalWithoutConsumingCommandValues(t *testing.T) {
+	args, verbose := globalOptions([]string{"--verbose", "push", "--message", "--verbose"})
+	if !verbose || len(args) != 3 || args[0] != "push" || args[2] != "--verbose" {
+		t.Fatalf("global options changed command arguments: verbose=%v args=%v", verbose, args)
+	}
+}

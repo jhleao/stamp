@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jhleao/stamp/internal/diagnostic"
 )
 
 const (
@@ -79,6 +81,7 @@ func ManagedByHomebrew() bool {
 }
 
 func Check(ctx context.Context, current string) (Result, error) {
+	diagnostic.Log("updater", "check", "current", current)
 	if !isReleaseVersion(current) {
 		return Result{}, fmt.Errorf("%q is a development build; update it from its source checkout", current)
 	}
@@ -114,6 +117,7 @@ func StartupCheck(current string) (Result, error) {
 }
 
 func Install(ctx context.Context, current, expected string) (Release, bool, error) {
+	diagnostic.Log("updater", "install.start", "current", current, "expected", expected)
 	if !isReleaseVersion(current) {
 		return Release{}, false, fmt.Errorf("%q is a development build; update it from its source checkout", current)
 	}
@@ -314,7 +318,8 @@ func trustedReleaseURL(value string) bool {
 
 func releaseClient() *http.Client {
 	return &http.Client{
-		Timeout: 2 * time.Minute,
+		Transport: diagnostic.Transport(http.DefaultTransport, "github"),
+		Timeout:   2 * time.Minute,
 		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
 			host := request.URL.Hostname()
 			if request.URL.Scheme != "https" || (host != "github.com" && !strings.HasSuffix(host, ".githubusercontent.com")) {
