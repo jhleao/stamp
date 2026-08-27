@@ -215,6 +215,11 @@ func Push(ctx context.Context, drive Drive, root, message, forceLease string) (p
 	return push(ctx, drive, root, "root", message, forceLease, renderProject)
 }
 
+// Create publishes a new project's first remote version below parentID.
+func Create(ctx context.Context, drive Drive, root, parentID string) (project.RemoteState, error) {
+	return push(ctx, drive, root, parentID, "Create project", "", renderProject)
+}
+
 func renderProject(root string) error {
 	_, err := render.All(root)
 	return err

@@ -48,7 +48,7 @@ for release binaries installed directly in a user-writable location such as
 ```text
 stamp login | logout
 stamp setup
-stamp new <dir> [--name <name>]
+stamp new <dir> [--name <name>] [--choose-drive-folder]
 stamp clone [dir]
 stamp pull [--incoming|--replace]
 stamp push [--message <text>] [--force-with-lease <version>]

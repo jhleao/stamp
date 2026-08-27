@@ -1,0 +1,7 @@
+# Release and supply-chain changes always require maintainer attention.
+/.github/workflows/ @jhleao
+/release.config.mjs @jhleao
+/scripts/package_release.sh @jhleao
+/scripts/update_homebrew_tap.sh @jhleao
+/package.json @jhleao
+/package-lock.json @jhleao

@@ -23,7 +23,8 @@ cd board-pack && stamp studio
 ```
 
 `stamp new` creates the local workspace and connected Google Drive project as
-one operation. Every project contains its content, TSX components, Tailwind
+one operation. Add `--choose-drive-folder` if it should live somewhere other
+than My Drive. Every project contains its content, TSX components, Tailwind
 theme, templates, examples, and assets.
 
 Use Studio to edit and inspect previews. To collaborate:
@@ -39,7 +40,7 @@ Share the project folder in Google Drive. A colleague checks it out with:
 ```sh
 stamp login
 stamp clone board-pack
-# Choose the project folder or its .stamp archive in Google Picker.
+# Choose the project's .stamp file in Google Picker.
 cd board-pack
 stamp studio
 ```

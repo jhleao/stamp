@@ -15,23 +15,25 @@ cd board-pack
 stamp studio
 ```
 
-The command prints the Drive folder URL. Share that project folder with
-collaborators using ordinary Google Drive permissions.
+By default, Stamp creates the remote project in My Drive. Add
+`--choose-drive-folder` to select another Drive folder before it uploads the
+project. The command prints the resulting Drive folder URL; share that folder
+with collaborators using ordinary Google Drive permissions.
 
 To work on a shared project:
 
 ```sh
 stamp clone board-pack
-# Choose the project folder or its .stamp archive in Google Picker.
+# Choose the project's .stamp file in Google Picker.
 cd board-pack
 stamp studio
 ```
 
 Stamp requests only Google’s per-file `drive.file` permission. Picker makes the
-project grant explicit without exposing the rest of the user’s Drive. Select
-the project folder first. If Stamp says its archive is not authorized, run
-`stamp clone` again and select the `.stamp` archive inside that folder; this is
-needed only when the archive predates that collaborator’s Stamp authorization.
+project grant explicit without exposing the rest of the user’s Drive. Picker
+shows only Stamp project archives, so select the `.stamp` file shared by the
+project owner. Editor access to its containing folder lets Stamp maintain the
+canonical archive and publish the generated files in `Current`.
 
 Stamp stores the canonical project as one `.stamp` archive. Each Push creates a
 retained Drive revision and uses its immutable content version as a lease. The

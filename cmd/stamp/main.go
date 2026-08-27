@@ -138,6 +138,8 @@ version is available.
     cd first-project
 
 Stamp creates the local folder and its connected Google Drive project together.
+Add ` + "`--choose-drive-folder`" + ` to choose its Drive location; otherwise it is
+created in My Drive.
 The folder contains readable Markdown content and its complete visual theme.
 
 ## 3. Open Studio
@@ -173,7 +175,7 @@ Share the project folder with them in Google Drive. After they install Stamp and
 run ` + "`stamp login`" + `:
 
     stamp clone first-project
-    # Choose the shared project in Google Drive.
+    # Choose the shared .stamp project file in Google Drive.
     cd first-project
     stamp studio
 
@@ -270,7 +272,15 @@ func setupNew(reader *bufio.Reader) error {
 		return err
 	}
 	name = defaultString(name, "My Project")
-	if err := newCommand([]string{dir, "--name", name}); err != nil {
+	args := []string{dir, "--name", name}
+	chooseFolder, err := confirm(reader, "Choose a Google Drive folder?", false)
+	if err != nil {
+		return err
+	}
+	if chooseFolder {
+		args = append(args, "--choose-drive-folder")
+	}
+	if err := newCommand(args); err != nil {
 		return err
 	}
 	return offerStudio(reader, dir)
@@ -315,26 +325,33 @@ func isTerminal(file *os.File) bool {
 }
 
 func newCommand(args []string) error {
-	pos, opts, _, err := parseArgs(args, []string{"name"}, nil)
+	pos, opts, flags, err := parseArgs(args, []string{"name"}, []string{"choose-drive-folder"})
 	if err != nil {
 		return err
 	}
 	if len(pos) != 1 {
-		return errors.New("usage: stamp new <directory> [--name <name>]")
+		return errors.New("usage: stamp new <directory> [--name <name>] [--choose-drive-folder]")
 	}
 	dir, err := filepath.Abs(pos[0])
 	if err != nil {
 		return err
 	}
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return fmt.Errorf("connect Google Drive: %w", err)
+	}
+	parentID := "root"
+	if flags["choose-drive-folder"] {
+		parentID, err = stampdrive.PickDestinationFolder(context.Background())
+		if err != nil {
+			return fmt.Errorf("choose Google Drive destination: %w", err)
+		}
+	}
 	manifest, err := project.Create(dir, opts["name"])
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
-	if err != nil {
-		return fmt.Errorf("created %s locally, but could not connect Google Drive: %w", dir, err)
-	}
-	state, err := collab.Push(context.Background(), drive, dir, "Create project", "")
+	state, err := collab.Create(context.Background(), drive, dir, parentID)
 	if err != nil {
 		return fmt.Errorf("created %s locally, but could not create its Drive project: %w", dir, err)
 	}
@@ -351,7 +368,7 @@ func cloneCommand(args []string) error {
 	if len(args) == 1 {
 		destination = args[0]
 	}
-	id, err := stampdrive.PickFolder(context.Background())
+	id, err := stampdrive.PickProjectArchive(context.Background())
 	if err != nil {
 		return err
 	}
@@ -584,7 +601,7 @@ func usage() {
 Usage:
   stamp setup
   stamp login | logout
-  stamp new <directory> [--name <name>]
+  stamp new <directory> [--name <name>] [--choose-drive-folder]
   stamp clone [directory]
   stamp pull [--incoming|--replace]
   stamp push [--message <text>] [--force-with-lease <version>]
