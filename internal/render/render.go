@@ -30,6 +30,7 @@ import (
 	"golang.org/x/net/html/atom"
 	"gopkg.in/yaml.v3"
 
+	"github.com/jhleao/stamp/internal/diagnostic"
 	"github.com/jhleao/stamp/internal/theme"
 )
 
@@ -66,7 +67,9 @@ var markdown = goldmark.New(
 var pagedJS string
 
 func All(root string) ([]Result, error) {
+	diagnostic.Log("render", "all.start", "root", root)
 	if err := theme.CompileIfNeeded(context.Background(), root); err != nil {
+		diagnostic.Log("render", "theme.error", "error", err)
 		return nil, err
 	}
 	var sources []string
@@ -93,6 +96,7 @@ func All(root string) ([]Result, error) {
 		return nil, err
 	}
 	sort.Strings(sources)
+	diagnostic.Log("render", "sources", "count", len(sources))
 	if err := os.MkdirAll(filepath.Join(root, "outputs"), 0o755); err != nil {
 		return nil, err
 	}
@@ -108,6 +112,8 @@ func All(root string) ([]Result, error) {
 		}
 	}()
 	for _, source := range sources {
+		started := time.Now()
+		diagnostic.Log("render", "source.start", "source", source, "kind", kind(source))
 		if k := kind(source); (k == "page" || k == "deck") && printer == nil {
 			printer, err = newChromePrinter()
 			if err != nil {
@@ -116,14 +122,17 @@ func All(root string) ([]Result, error) {
 		}
 		output, err := renderOne(root, source, printer)
 		if err != nil {
+			diagnostic.Log("render", "source.error", "source", source, "duration", time.Since(started).Round(time.Millisecond), "error", err)
 			problems = append(problems, fmt.Sprintf("%s: %v", source, err))
 			continue
 		}
+		diagnostic.Log("render", "source.complete", "source", source, "output", output, "duration", time.Since(started).Round(time.Millisecond))
 		results = append(results, Result{Source: filepath.ToSlash(source), Output: filepath.ToSlash(output)})
 	}
 	if len(problems) > 0 {
 		return results, fmt.Errorf("render failed:\n  %s", strings.Join(problems, "\n  "))
 	}
+	diagnostic.Log("render", "all.complete", "outputs", len(results))
 	return results, nil
 }
 

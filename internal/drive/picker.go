@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/jhleao/stamp/internal/diagnostic"
 )
 
 const pickerAppID = "174648149574"
@@ -47,27 +49,34 @@ func PickDestinationFolder(ctx context.Context) (string, error) {
 }
 
 func pick(ctx context.Context, request pickerRequest) (string, error) {
+	done := diagnostic.Start("picker", "select", "folders", request.folders, "mime", request.mime)
 	developerKey := strings.TrimSpace(os.Getenv("STAMP_GOOGLE_PICKER_API_KEY"))
 	if developerKey == "" {
 		developerKey = strings.TrimSpace(DefaultPickerAPIKey)
 	}
 	if developerKey == "" {
-		return "", errors.New("Google Picker is not configured in this build")
+		err := errors.New("Google Picker is not configured in this build")
+		done(err)
+		return "", err
 	}
 	config, clientID, err := oauthConfig()
 	if err != nil {
+		done(err)
 		return "", err
 	}
 	token, err := loadToken(clientID)
 	if err != nil {
+		done(err)
 		return "", err
 	}
-	access, err := config.TokenSource(ctx, token).Token()
+	access, err := config.TokenSource(diagnostic.HTTPContext(ctx, "google-oauth"), token).Token()
 	if err != nil {
+		done(err)
 		return "", fmt.Errorf("refresh Google login: %w", err)
 	}
 	listener, err := net.Listen("tcp", pickerAddress)
 	if err != nil {
+		done(err)
 		return "", fmt.Errorf("open Google Picker on localhost:57184: %w", err)
 	}
 	defer listener.Close()
@@ -105,18 +114,26 @@ func pick(ctx context.Context, request pickerRequest) (string, error) {
 	go server.Serve(listener)
 	url := "http://localhost:57184/"
 	if err := exec.Command("open", url).Start(); err != nil {
+		done(err)
 		return "", fmt.Errorf("open Google Picker: %w", err)
 	}
 	defer server.Shutdown(context.Background())
 	select {
 	case id := <-selection:
 		if id == "" {
-			return "", errors.New("Google Drive project selection cancelled")
+			err := errors.New("Google Drive project selection cancelled")
+			done(err)
+			return "", err
 		}
+		diagnostic.Log("picker", "selected", "file_id", id)
+		done(nil)
 		return id, nil
 	case <-time.After(5 * time.Minute):
-		return "", errors.New("Google Drive project selection timed out")
+		err := errors.New("Google Drive project selection timed out")
+		done(err)
+		return "", err
 	case <-ctx.Done():
+		done(ctx.Err())
 		return "", ctx.Err()
 	}
 }

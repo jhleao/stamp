@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jhleao/stamp/internal/collab"
+	"github.com/jhleao/stamp/internal/diagnostic"
 	"github.com/jhleao/stamp/internal/doctor"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
@@ -25,19 +26,44 @@ import (
 var version = "dev"
 
 func main() {
-	if automaticUpdateChecksEnabled() && shouldCheckForUpdate(os.Args[1:]) {
+	args, verbose := globalOptions(os.Args[1:])
+	if verbose || diagnostic.EnabledByEnvironment() {
+		diagnostic.Enable(os.Stderr)
+	}
+	started := time.Now()
+	command := "help"
+	if len(args) > 0 {
+		command = args[0]
+	}
+	diagnostic.Log("cli", "start", "version", version, "command", command, "pid", os.Getpid())
+	if automaticUpdateChecksEnabled() && shouldCheckForUpdate(args) {
+		checkDone := diagnostic.Start("updater", "startup_check", "version", version)
 		if update, err := updater.StartupCheck(version); err == nil && update.Available {
 			command := "stamp update"
 			if updater.ManagedByHomebrew() {
 				command = "brew upgrade stamp"
 			}
 			fmt.Fprintf(os.Stderr, "Stamp %s is available. Run `%s`.\n", update.Latest, command)
+			checkDone(nil)
+		} else {
+			checkDone(err)
 		}
 	}
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(args); err != nil {
+		diagnostic.Log("cli", "exit", "command", command, "duration", time.Since(started).Round(time.Millisecond), "error", err)
 		fmt.Fprintln(os.Stderr, "stamp:", err)
 		os.Exit(1)
 	}
+	diagnostic.Log("cli", "exit", "command", command, "duration", time.Since(started).Round(time.Millisecond), "status", "ok")
+}
+
+func globalOptions(args []string) ([]string, bool) {
+	verbose := false
+	for len(args) > 0 && args[0] == "--verbose" {
+		verbose = true
+		args = args[1:]
+	}
+	return args, verbose
 }
 
 func automaticUpdateChecksEnabled() bool {
@@ -168,6 +194,12 @@ You can also prepare an agent manually from the project folder:
 
 Pull before editing. Push only when the version is ready for other people.
 Stamp refuses to overwrite a newer Drive version without an explicit review.
+
+If collaboration fails, capture sanitized production diagnostics:
+
+    stamp --verbose pull 2>&1 | tee stamp-debug.log
+
+The same global flag works with clone, push, studio, login, and other commands.
 
 ## Add a colleague
 
@@ -599,6 +631,7 @@ func usage() {
 	fmt.Print(`Stamp makes document projects with people and agents.
 
 Usage:
+	stamp [--verbose] <command>
   stamp setup
   stamp login | logout
   stamp new <directory> [--name <name>] [--choose-drive-folder]
@@ -611,6 +644,9 @@ Usage:
   stamp doctor
   stamp update [--check|--yes]
   stamp version
+
+Use --verbose before a command to print sanitized production
+diagnostics to stderr. STAMP_VERBOSE=1 enables the same logging.
 `)
 }
 
