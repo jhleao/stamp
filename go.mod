@@ -7,7 +7,7 @@ require (
 	github.com/chromedp/chromedp v0.14.2
 	github.com/dop251/goja v0.0.0-20260806115107-493f22071ef6
 	github.com/evanw/esbuild v0.28.2
-	github.com/yuin/goldmark v1.7.8
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/net v0.43.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.249.0
