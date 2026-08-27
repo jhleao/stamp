@@ -52,6 +52,7 @@ for target in "${targets[@]}"; do
     -o "$stage/$binary" \
     "$repo_root/cmd/stamp"
   cp "$repo_root/README.md" "$stage/README.md"
+  cp "$repo_root/CHANGELOG.md" "$stage/CHANGELOG.md"
 
   if [[ "$os" == "darwin" ]]; then
     required_apple_variables=(
