@@ -1,10 +1,10 @@
 module github.com/jhleao/stamp
 
-go 1.25.0
+go 1.26
 
 require (
-	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
-	github.com/chromedp/chromedp v0.14.2
+	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
+	github.com/chromedp/chromedp v0.16.0
 	github.com/dop251/goja v0.0.0-20260806115107-493f22071ef6
 	github.com/evanw/esbuild v0.28.2
 	github.com/yuin/goldmark v1.7.8
@@ -22,7 +22,7 @@ require (
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
