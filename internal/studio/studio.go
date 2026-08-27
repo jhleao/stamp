@@ -24,6 +24,7 @@ import (
 
 	"github.com/jhleao/stamp/internal/bundle"
 	"github.com/jhleao/stamp/internal/collab"
+	"github.com/jhleao/stamp/internal/diagnostic"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
@@ -109,6 +110,7 @@ type syncDetails struct {
 }
 
 func Start(ctx context.Context, root string, openBrowser bool, version string) error {
+	diagnostic.Log("studio", "start", "root", root, "open_browser", openBrowser, "version", version)
 	connected, err := project.Connected(root)
 	if err != nil {
 		return err
@@ -138,12 +140,14 @@ func Start(ctx context.Context, root string, openBrowser bool, version string) e
 		_ = httpServer.Shutdown(shutdown)
 	}()
 	url := server.origin + "/" + server.token + "/"
+	diagnostic.Log("studio", "listening", "address", server.host)
 	fmt.Println("Studio:", url)
 	if openBrowser {
 		_ = exec.Command("open", url).Start()
 	}
 	err = httpServer.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) {
+		diagnostic.Log("studio", "stopped", "reason", "context cancelled")
 		return nil
 	}
 	return err

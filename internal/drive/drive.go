@@ -22,6 +22,8 @@ import (
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
+
+	"github.com/jhleao/stamp/internal/diagnostic"
 )
 
 const defaultKeychainService = "sh.stamp.google-drive"
@@ -127,16 +129,22 @@ func Credentials() (CredentialInfo, error) {
 }
 
 func Login(ctx context.Context) (string, error) {
+	done := diagnostic.Start("drive", "login")
+	var resultErr error
+	defer func() { done(resultErr) }()
 	config, clientID, err := oauthConfig()
 	if err != nil {
+		resultErr = err
 		return "", err
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		resultErr = err
 		return "", err
 	}
 	defer listener.Close()
 	config.RedirectURL = "http://" + listener.Addr().String() + "/oauth/callback"
+	diagnostic.Log("drive", "login.callback_ready", "address", listener.Addr().String())
 	state := randomToken()
 	verifier := oauth2.GenerateVerifier()
 	type loginResult struct {
@@ -168,32 +176,39 @@ func Login(ctx context.Context) (string, error) {
 	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce, oauth2.S256ChallengeOption(verifier))
 	fmt.Fprintln(os.Stderr, "Continue in your browser:", authURL)
 	if err := exec.Command("open", authURL).Start(); err != nil {
+		resultErr = err
 		return "", fmt.Errorf("open browser: %w", err)
 	}
 	var authCode string
 	select {
 	case login := <-result:
 		if login.err != nil {
+			resultErr = login.err
 			return "", login.err
 		}
 		authCode = login.code
 	case <-time.After(3 * time.Minute):
+		resultErr = errors.New("Google login timed out")
 		return "", errors.New("Google login did not complete; if Google says Stamp is being tested, add this account under Google Auth Platform > Audience > Test users, or make the app Internal")
 	case <-ctx.Done():
+		resultErr = ctx.Err()
 		return "", ctx.Err()
 	}
 	_ = server.Shutdown(context.Background())
-	token, err := config.Exchange(ctx, authCode, oauth2.VerifierOption(verifier))
+	token, err := config.Exchange(diagnostic.HTTPContext(ctx, "google-oauth"), authCode, oauth2.VerifierOption(verifier))
 	if err != nil {
+		resultErr = err
 		return "", fmt.Errorf("exchange Google login: %w", err)
 	}
 	if err := saveToken(clientID, token); err != nil {
+		resultErr = err
 		return "", err
 	}
 	return "Google Drive connected", nil
 }
 
 func Logout() error {
+	diagnostic.Log("drive", "logout.start")
 	config, clientID, err := oauthConfig()
 	if err != nil {
 		return err
@@ -207,23 +222,29 @@ func Logout() error {
 }
 
 func New(ctx context.Context) (*Client, error) {
+	done := diagnostic.Start("drive", "client")
 	config, clientID, err := oauthConfig()
 	if err != nil {
+		done(err)
 		return nil, err
 	}
 	token, err := loadToken(clientID)
 	if err != nil {
+		done(err)
 		return nil, err
 	}
-	httpClient := config.Client(ctx, token)
+	httpClient := config.Client(diagnostic.HTTPContext(ctx, "google-drive"), token)
 	api, err := drive.NewService(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
+		done(err)
 		return nil, err
 	}
+	done(nil)
 	return &Client{api: api}, nil
 }
 
 func (c *Client) Get(ctx context.Context, id string) (Item, error) {
+	diagnostic.Log("drive", "files.get", "file_id", id)
 	file, err := c.api.Files.Get(id).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
 	if err != nil {
 		return Item{}, err
@@ -232,6 +253,7 @@ func (c *Client) Get(ctx context.Context, id string) (Item, error) {
 }
 
 func (c *Client) Rename(ctx context.Context, id, name string) (Item, error) {
+	diagnostic.Log("drive", "files.rename", "file_id", id, "name", name)
 	if strings.TrimSpace(name) == "" {
 		return Item{}, errors.New("name is required")
 	}
@@ -243,15 +265,18 @@ func (c *Client) Rename(ctx context.Context, id, name string) (Item, error) {
 }
 
 func (c *Client) Children(ctx context.Context, parentID string) ([]Item, error) {
+	diagnostic.Log("drive", "files.children", "parent_id", parentID)
 	return c.search(ctx, fmt.Sprintf("'%s' in parents and trashed=false", escape(parentID)))
 }
 
 func (c *Client) EnsureFolder(ctx context.Context, parentID, name string, props map[string]string) (Item, error) {
+	diagnostic.Log("drive", "folders.ensure", "parent_id", parentID, "name", name)
 	items, err := c.search(ctx, fmt.Sprintf("'%s' in parents and name='%s' and mimeType='%s' and trashed=false", escape(parentID), escape(name), driveFolder))
 	if err != nil {
 		return Item{}, err
 	}
 	if len(items) > 0 {
+		diagnostic.Log("drive", "folders.found", "folder_id", items[0].ID, "name", items[0].Name)
 		return items[0], nil
 	}
 	file, err := c.api.Files.Create(&drive.File{Name: name, MimeType: driveFolder, Parents: []string{parentID}, AppProperties: props}).
@@ -263,6 +288,7 @@ func (c *Client) EnsureFolder(ctx context.Context, parentID, name string, props 
 }
 
 func (c *Client) CreateFile(ctx context.Context, parentID, name, mime string, contents io.Reader, props map[string]string) (Item, error) {
+	diagnostic.Log("drive", "files.create", "parent_id", parentID, "name", name, "mime", mime)
 	file, err := c.api.Files.Create(&drive.File{Name: name, MimeType: mime, Parents: []string{parentID}, AppProperties: props}).
 		Media(contents).SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
 	if err != nil {
@@ -272,6 +298,7 @@ func (c *Client) CreateFile(ctx context.Context, parentID, name, mime string, co
 }
 
 func (c *Client) UpdateFile(ctx context.Context, id, mime string, contents io.Reader) (Item, error) {
+	diagnostic.Log("drive", "files.update", "file_id", id, "mime", mime)
 	file, err := c.api.Files.Update(id, &drive.File{MimeType: mime}).Media(contents).
 		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
 	if err != nil {
@@ -281,6 +308,7 @@ func (c *Client) UpdateFile(ctx context.Context, id, mime string, contents io.Re
 }
 
 func (c *Client) UpdateNamedFile(ctx context.Context, id, name, mime string, contents io.Reader) (Item, error) {
+	diagnostic.Log("drive", "files.update_named", "file_id", id, "name", name, "mime", mime)
 	file, err := c.api.Files.Update(id, &drive.File{Name: name, MimeType: mime}).Media(contents).
 		SupportsAllDrives(true).Fields(fileFields).Context(ctx).Do()
 	if err != nil {
@@ -290,11 +318,13 @@ func (c *Client) UpdateNamedFile(ctx context.Context, id, name, mime string, con
 }
 
 func (c *Client) Trash(ctx context.Context, id string) error {
+	diagnostic.Log("drive", "files.trash", "file_id", id)
 	_, err := c.api.Files.Update(id, &drive.File{Trashed: true}).SupportsAllDrives(true).Context(ctx).Do()
 	return err
 }
 
 func (c *Client) Retain(ctx context.Context, item Item) error {
+	diagnostic.Log("drive", "revisions.retain", "file_id", item.ID, "revision", item.revision)
 	if item.revision == "" {
 		return errors.New("Drive did not return a revision ID")
 	}
@@ -303,26 +333,33 @@ func (c *Client) Retain(ctx context.Context, item Item) error {
 }
 
 func (c *Client) Download(ctx context.Context, id string) ([]byte, error) {
+	diagnostic.Log("drive", "files.download", "file_id", id)
 	response, err := c.api.Files.Get(id).SupportsAllDrives(true).Context(ctx).Download()
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
-	return io.ReadAll(io.LimitReader(response.Body, 513<<20))
+	contents, err := io.ReadAll(io.LimitReader(response.Body, 513<<20))
+	diagnostic.Log("drive", "files.downloaded", "file_id", id, "bytes", len(contents), "error", err)
+	return contents, err
 }
 
 func (c *Client) FindChildByProperty(ctx context.Context, parentID, key, value string) (Item, bool, error) {
+	diagnostic.Log("drive", "files.find_property", "parent_id", parentID, "property", key, "value", value)
 	items, err := c.search(ctx, fmt.Sprintf("'%s' in parents and appProperties has { key='%s' and value='%s' } and trashed=false", escape(parentID), escape(key), escape(value)))
 	if err != nil {
 		return Item{}, false, err
 	}
 	if len(items) == 0 {
+		diagnostic.Log("drive", "files.property_not_found", "parent_id", parentID, "property", key)
 		return Item{}, false, nil
 	}
+	diagnostic.Log("drive", "files.property_found", "file_id", items[0].ID, "name", items[0].Name)
 	return items[0], true, nil
 }
 
 func (c *Client) search(ctx context.Context, query string) ([]Item, error) {
+	diagnostic.Log("drive", "files.search", "query", query)
 	var result []Item
 	pageToken := ""
 	for {
@@ -339,6 +376,7 @@ func (c *Client) search(ctx context.Context, query string) ([]Item, error) {
 			result = append(result, toItem(file))
 		}
 		pageToken = page.NextPageToken
+		diagnostic.Log("drive", "files.search_page", "results", len(page.Files), "has_next_page", pageToken != "")
 		if pageToken == "" {
 			return result, nil
 		}
@@ -428,6 +466,7 @@ func fileExists(path string) bool {
 }
 
 func loadToken(account string) (*oauth2.Token, error) {
+	diagnostic.Log("drive", "keychain.load", "account", account)
 	output, err := exec.Command("security", "find-generic-password", "-s", keychainService(), "-a", account, "-w").Output()
 	if err != nil {
 		return nil, errors.New("not logged in; run stamp login")
@@ -440,6 +479,7 @@ func loadToken(account string) (*oauth2.Token, error) {
 }
 
 func saveToken(account string, token *oauth2.Token) error {
+	diagnostic.Log("drive", "keychain.save", "account", account, "has_refresh_token", token.RefreshToken != "", "expiry", token.Expiry)
 	data, err := json.Marshal(token)
 	if err != nil {
 		return err
