@@ -42,7 +42,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/preact": "^3.2.4",
     "@types/node": "^26.2.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "semantic-release": "^25.0.9",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
