@@ -3,6 +3,7 @@ package collab
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/jhleao/stamp/internal/bundle"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
+	"github.com/jhleao/stamp/internal/render"
 )
 
 type fakeDrive struct {
@@ -39,10 +41,45 @@ func (f *fakeDrive) UpdateNamedFile(context.Context, string, string, string, io.
 func (f *fakeDrive) Children(context.Context, string) ([]stampdrive.Item, error) { return nil, nil }
 func (f *fakeDrive) Trash(context.Context, string) error                         { return nil }
 func (f *fakeDrive) Retain(context.Context, stampdrive.Item) error               { return nil }
+func (f *fakeDrive) ResolveFiles(_ context.Context, _ string, refs []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
+	items := make(map[string]stampdrive.Item, len(refs))
+	for _, ref := range refs {
+		id := ref.ID
+		if id == "" {
+			id = "selected-" + ref.Key
+		}
+		items[ref.Key] = stampdrive.Item{ID: id, Name: ref.Name, CanEdit: true}
+	}
+	return items, nil
+}
 
 type recordingDrive struct {
 	fakeDrive
 	uploaded []byte
+}
+
+type blockedOutputDrive struct {
+	fakeDrive
+	writes int
+}
+
+func (f *blockedOutputDrive) ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
+	return nil, errors.New("published files were not authorized")
+}
+
+func (f *blockedOutputDrive) UpdateFile(context.Context, string, string, io.Reader) (stampdrive.Item, error) {
+	f.writes++
+	return stampdrive.Item{}, nil
+}
+
+func (f *blockedOutputDrive) UpdateNamedFile(context.Context, string, string, string, io.Reader) (stampdrive.Item, error) {
+	f.writes++
+	return stampdrive.Item{}, nil
+}
+
+func (f *blockedOutputDrive) CreateFile(context.Context, string, string, string, io.Reader, map[string]string) (stampdrive.Item, error) {
+	f.writes++
+	return stampdrive.Item{}, nil
 }
 
 func (f *recordingDrive) UpdateNamedFile(_ context.Context, _ string, _ string, _ string, contents io.Reader) (stampdrive.Item, error) {
@@ -203,7 +240,7 @@ func TestPushArchiveOmitsDeletedWorkspaceFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	drive := &recordingDrive{fakeDrive: fakeDrive{item: stampdrive.Item{ID: "canonical", Version: "2"}}}
-	if _, err := push(context.Background(), drive, root, "root", "cleanup", "", func(string) error { return nil }); err != nil {
+	if _, err := push(context.Background(), drive, root, "root", "cleanup", "", func(string) ([]render.Result, error) { return nil, nil }, nil); err != nil {
 		t.Fatal(err)
 	}
 	unpacked := t.TempDir()
@@ -212,5 +249,36 @@ func TestPushArchiveOmitsDeletedWorkspaceFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(unpacked, "documents", "remove-me.page.md")); !os.IsNotExist(err) {
 		t.Fatalf("deleted file remains in pushed archive: %v", err)
+	}
+}
+
+func TestPushDoesNotWriteWhenCanonicalOutputsAreNotAuthorized(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "local")
+	if _, err := project.Create(root, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(root, "outputs", "brief.pdf")
+	if err := os.WriteFile(output, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := project.FileHashes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteState(root, project.RemoteState{
+		FileID: "canonical", ProjectFolderID: "project", CurrentFolderID: "current",
+		BaseVersion: "2", Files: hashes, Outputs: map[string]string{"brief.pdf": "published-pdf"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drive := &blockedOutputDrive{fakeDrive: fakeDrive{item: stampdrive.Item{ID: "canonical", Version: "2"}}}
+	_, err = push(context.Background(), drive, root, "root", "update", "", func(string) ([]render.Result, error) {
+		return []render.Result{{Source: "documents/brief.page.md", Output: "outputs/brief.pdf"}}, nil
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "connect published files before Push") {
+		t.Fatalf("expected authorization refusal, got %v", err)
+	}
+	if drive.writes != 0 {
+		t.Fatalf("push made %d Drive writes before output authorization", drive.writes)
 	}
 }
