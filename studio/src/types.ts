@@ -45,3 +45,11 @@ export interface SyncDetails {
   remote: FileChange[];
   error?: string;
 }
+
+export interface PushProgress {
+  stage: string;
+  detail?: string;
+  completed: number;
+  total: number;
+  percent: number;
+}

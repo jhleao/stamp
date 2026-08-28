@@ -54,7 +54,7 @@ func TestCompileTailwind(t *testing.T) {
 
 func TestCreateComponent(t *testing.T) {
 	root := t.TempDir()
-	server := &Server{root: root, clients: map[chan string]struct{}{}}
+	server := &Server{root: root, clients: map[chan serverEvent]struct{}{}}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest("POST", "/api/components", strings.NewReader(`{"name":"MetricCard"}`))
 	server.createComponent(recorder, request)
@@ -78,7 +78,7 @@ func TestFileTreeOperations(t *testing.T) {
 	if err := os.WriteFile(original, []byte("# Brief\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{root: root, clients: map[chan string]struct{}{}}
+	server := &Server{root: root, clients: map[chan serverEvent]struct{}{}}
 
 	duplicateRecorder := httptest.NewRecorder()
 	duplicateRequest := httptest.NewRequest("POST", "/api/file/duplicate", strings.NewReader(`{"path":"documents/brief.page.md"}`))
@@ -122,7 +122,7 @@ func TestFolderTreeOperations(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(client, "brief.page.md"), []byte("# Brief\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{root: root, clients: map[chan string]struct{}{}}
+	server := &Server{root: root, clients: map[chan serverEvent]struct{}{}}
 
 	renameRecorder := httptest.NewRecorder()
 	renameRequest := httptest.NewRequest("PATCH", "/api/folder", strings.NewReader(`{"path":"documents/Client","name":"Customer"}`))
@@ -161,7 +161,7 @@ func TestMoveFilesMovesSelectionAndRejectsCollisionsBeforeChangingAnything(t *te
 			t.Fatal(err)
 		}
 	}
-	server := &Server{root: root, clients: map[chan string]struct{}{}}
+	server := &Server{root: root, clients: map[chan serverEvent]struct{}{}}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest("POST", "/api/files/move", strings.NewReader(`{"paths":["documents/One/alpha.page.md","documents/Two/beta.page.md"],"destination":"documents/Target"}`))
 	server.moveFiles(recorder, request)

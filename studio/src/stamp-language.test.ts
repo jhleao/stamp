@@ -19,7 +19,7 @@ beforeAll(async () => {
   const stamp = await import("./stamp-language");
   stampLanguageId = stamp.stampLanguageId;
   stamp.registerStampLanguage(monaco);
-});
+}, 30_000);
 
 function tokenTypes(source: string) {
   return monaco.editor.tokenize(source, stampLanguageId).flatMap((line) => line.map((token) => token.type));

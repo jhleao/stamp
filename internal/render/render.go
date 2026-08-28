@@ -39,6 +39,8 @@ type Result struct {
 	Output string `json:"output"`
 }
 
+type ProgressFunc func(completed, total int, source string)
+
 type pageData struct {
 	Title   string
 	Format  string
@@ -67,6 +69,10 @@ var markdown = goldmark.New(
 var pagedJS string
 
 func All(root string) ([]Result, error) {
+	return AllWithProgress(root, nil)
+}
+
+func AllWithProgress(root string, progress ProgressFunc) ([]Result, error) {
 	diagnostic.Log("render", "all.start", "root", root)
 	if err := theme.CompileIfNeeded(context.Background(), root); err != nil {
 		diagnostic.Log("render", "theme.error", "error", err)
@@ -111,7 +117,10 @@ func All(root string) ([]Result, error) {
 			printer.Close()
 		}
 	}()
-	for _, source := range sources {
+	for index, source := range sources {
+		if progress != nil {
+			progress(index, len(sources), filepath.ToSlash(source))
+		}
 		started := time.Now()
 		diagnostic.Log("render", "source.start", "source", source, "kind", kind(source))
 		if k := kind(source); (k == "page" || k == "deck") && printer == nil {
@@ -128,6 +137,9 @@ func All(root string) ([]Result, error) {
 		}
 		diagnostic.Log("render", "source.complete", "source", source, "output", output, "duration", time.Since(started).Round(time.Millisecond))
 		results = append(results, Result{Source: filepath.ToSlash(source), Output: filepath.ToSlash(output)})
+	}
+	if progress != nil {
+		progress(len(sources), len(sources), "")
 	}
 	if len(problems) > 0 {
 		return results, fmt.Errorf("render failed:\n  %s", strings.Join(problems, "\n  "))

@@ -1,6 +1,7 @@
 package collab
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -9,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,9 +47,9 @@ type Drive interface {
 	CreateFile(context.Context, string, string, string, io.Reader, map[string]string) (stampdrive.Item, error)
 	UpdateFile(context.Context, string, string, io.Reader) (stampdrive.Item, error)
 	UpdateNamedFile(context.Context, string, string, string, io.Reader) (stampdrive.Item, error)
-	Children(context.Context, string) ([]stampdrive.Item, error)
 	Trash(context.Context, string) error
 	Retain(context.Context, stampdrive.Item) error
+	ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error)
 }
 
 const (
@@ -119,7 +119,11 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	if err != nil {
 		return Workspace{}, err
 	}
-	state := project.RemoteState{FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID, BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL, Files: hashes}
+	outputs, err := readOutputLedger(contents)
+	if err != nil {
+		return Workspace{}, err
+	}
+	state := project.RemoteState{FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID, BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL, Files: hashes, Outputs: outputs}
 	if err := project.WriteState(destination, state); err != nil {
 		return Workspace{}, err
 	}
@@ -214,7 +218,11 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 	if err != nil {
 		return "", err
 	}
-	state.BaseVersion, state.BaseHash, state.Files = remote.Version, hash(contents), hashes
+	outputs, err := readOutputLedger(contents)
+	if err != nil {
+		return "", err
+	}
+	state.BaseVersion, state.BaseHash, state.Files, state.Outputs = remote.Version, hash(contents), hashes, outputs
 	if err := project.WriteState(root, state); err != nil {
 		return "", err
 	}
@@ -223,27 +231,58 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 }
 
 func Push(ctx context.Context, drive Drive, root, message, forceLease string) (project.RemoteState, error) {
-	return push(ctx, drive, root, "root", message, forceLease, renderProject)
+	return push(ctx, drive, root, "root", message, forceLease, renderProject, nil)
+}
+
+type PushProgress struct {
+	Stage     string `json:"stage"`
+	Detail    string `json:"detail,omitempty"`
+	Completed int    `json:"completed"`
+	Total     int    `json:"total"`
+	Percent   int    `json:"percent"`
+}
+
+type PushProgressFunc func(PushProgress)
+
+func PushWithProgress(ctx context.Context, drive Drive, root, message, forceLease string, progress PushProgressFunc) (project.RemoteState, error) {
+	renderWithProgress := func(root string) ([]render.Result, error) {
+		return render.AllWithProgress(root, func(completed, total int, source string) {
+			percent := 5
+			if total > 0 {
+				percent += completed * 45 / total
+			}
+			if progress != nil {
+				progress(PushProgress{Stage: "Rendering documents", Detail: source, Completed: completed, Total: total, Percent: percent})
+			}
+		})
+	}
+	return push(ctx, drive, root, "root", message, forceLease, renderWithProgress, progress)
 }
 
 // Create publishes a new project's first remote version below parentID.
 func Create(ctx context.Context, drive Drive, root, parentID string) (project.RemoteState, error) {
-	return push(ctx, drive, root, parentID, "Create project", "", renderProject)
+	return push(ctx, drive, root, parentID, "Create project", "", renderProject, nil)
 }
 
-func renderProject(root string) error {
-	_, err := render.All(root)
-	return err
+func renderProject(root string) ([]render.Result, error) {
+	return render.All(root)
 }
 
-func push(ctx context.Context, drive Drive, root, parentID, message, forceLease string, renderWorkspace func(string) error) (project.RemoteState, error) {
+func push(ctx context.Context, drive Drive, root, parentID, message, forceLease string, renderWorkspace func(string) ([]render.Result, error), progress PushProgressFunc) (project.RemoteState, error) {
+	report := func(update PushProgress) {
+		if progress != nil {
+			progress(update)
+		}
+	}
 	diagnostic.Log("collab", "push.start", "root", root, "parent_id", parentID, "force_lease", forceLease != "")
+	report(PushProgress{Stage: "Preparing workspace", Percent: 2})
 	manifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
 	renderDone := diagnostic.Start("render", "workspace", "root", root)
-	if err := renderWorkspace(root); err != nil {
+	results, err := renderWorkspace(root)
+	if err != nil {
 		renderDone(err)
 		return project.RemoteState{}, err
 	}
@@ -261,6 +300,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	}
 	remoteVersion := ""
 	if !firstPush {
+		report(PushProgress{Stage: "Checking Google Drive", Percent: 52})
 		remote, err := drive.Get(ctx, state.FileID)
 		if err != nil {
 			return project.RemoteState{}, err
@@ -271,14 +311,51 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 			return project.RemoteState{}, err
 		}
 	}
+	outputFiles, err := collectOutputs(root, results)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	resolved := map[string]stampdrive.Item{}
+	if !firstPush {
+		refs := outputRefs(outputFiles, state.Outputs)
+		if len(refs) > 0 {
+			resolved, err = drive.ResolveFiles(ctx, state.CurrentFolderID, refs)
+			if err != nil {
+				return project.RemoteState{}, fmt.Errorf("connect published files before Push: %w", err)
+			}
+			for _, ref := range refs {
+				if item, ok := resolved[ref.Key]; !ok || item.ID == "" {
+					return project.RemoteState{}, fmt.Errorf("connect published files before Push: %q was not verified", ref.Name)
+				}
+			}
+		}
+	}
+	state.Outputs, err = syncOutputs(ctx, drive, state.CurrentFolderID, outputFiles, state.Outputs, resolved, func(completed, total int, detail string) {
+		percent := 55
+		if total > 0 {
+			percent += completed * 35 / total
+		}
+		report(PushProgress{Stage: "Uploading rendered files", Detail: detail, Completed: completed, Total: total, Percent: percent})
+	})
+	if err != nil {
+		return project.RemoteState{}, err
+	}
 	version := VersionInfo{Message: message, CreatedAt: time.Now().UTC().Format(time.RFC3339), ParentVersion: remoteVersion}
 	versionJSON, _ := json.MarshalIndent(version, "", "  ")
+	outputsJSON, _ := json.MarshalIndent(struct {
+		Files map[string]string `json:"files"`
+	}{Files: state.Outputs}, "", "  ")
 	var archive bytes.Buffer
-	if err := bundle.PackWith(root, &archive, map[string][]byte{".stamp/version.json": append(versionJSON, '\n')}); err != nil {
+	report(PushProgress{Stage: "Packaging project", Percent: 92})
+	if err := bundle.PackWith(root, &archive, map[string][]byte{
+		".stamp/version.json": append(versionJSON, '\n'),
+		".stamp/outputs.json": append(outputsJSON, '\n'),
+	}); err != nil {
 		return project.RemoteState{}, err
 	}
 	diagnostic.Log("collab", "push.packed", "bytes", archive.Len(), "parent_version", remoteVersion)
 	var updated stampdrive.Item
+	report(PushProgress{Stage: "Publishing project version", Percent: 96})
 	if firstPush {
 		updated, err = drive.CreateFile(ctx, state.ProjectFolderID, manifest.Name+".stamp", stampMIME, bytes.NewReader(archive.Bytes()), map[string]string{"stamp_kind": "canonical", "stamp_id": manifest.ID})
 		state.FileID = updated.ID
@@ -299,10 +376,8 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	if err := drive.Retain(ctx, updated); err != nil {
 		return state, fmt.Errorf("canonical version %s was pushed, but Drive did not preserve its revision: %w", updated.Version, err)
 	}
-	if err := syncOutputs(ctx, drive, root, state.CurrentFolderID); err != nil {
-		return state, fmt.Errorf("canonical version %s was pushed, but output mirrors need retrying: %w", state.BaseVersion, err)
-	}
 	diagnostic.Log("collab", "push.complete", "version", state.BaseVersion, "files", len(hashes))
+	report(PushProgress{Stage: "Push complete", Percent: 100})
 	return state, nil
 }
 
@@ -330,59 +405,132 @@ func createRemote(ctx context.Context, drive Drive, manifest project.Manifest, p
 	return nil
 }
 
-func syncOutputs(ctx context.Context, drive Drive, root, folderID string) error {
-	diagnostic.Log("collab", "outputs.sync_start", "folder_id", folderID)
-	if folderID == "" {
-		return errors.New("project has no Current folder")
-	}
-	current := map[string]bool{}
-	if err := filepath.WalkDir(filepath.Join(root, "outputs"), func(path string, entry fs.DirEntry, err error) error {
+type outputFile struct {
+	Name string
+	MIME string
+	Data []byte
+}
+
+func collectOutputs(root string, results []render.Result) (map[string]outputFile, error) {
+	files := make(map[string]outputFile, len(results))
+	for _, result := range results {
+		path := filepath.Join(root, filepath.FromSlash(result.Output))
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
+			return nil, err
 		}
 		rel, err := filepath.Rel(filepath.Join(root, "outputs"), path)
 		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
+			return nil, err
 		}
 		key := filepath.ToSlash(rel)
-		current[key] = true
-		item, ok, err := drive.FindChildByProperty(ctx, folderID, "stamp_path", key)
-		if err != nil {
-			return err
+		files[key] = outputFile{Name: strings.ReplaceAll(key, "/", " - "), MIME: mimeFor(path), Data: data}
+	}
+	return files, nil
+}
+
+func outputRefs(current map[string]outputFile, ledger map[string]string) []stampdrive.FileRef {
+	refs := make([]stampdrive.FileRef, 0, len(current)+len(ledger))
+	seen := map[string]bool{}
+	for key, file := range current {
+		// An empty ledger means this project predates output identities. Every
+		// existing mirror must be selected once; guessing would create duplicates.
+		if len(ledger) == 0 || ledger[key] != "" {
+			refs = append(refs, stampdrive.FileRef{Key: key, ID: ledger[key], Name: file.Name})
+			seen[key] = true
 		}
-		mime := mimeFor(path)
+	}
+	for key, id := range ledger {
+		if !seen[key] {
+			refs = append(refs, stampdrive.FileRef{Key: key, ID: id, Name: strings.ReplaceAll(key, "/", " - ")})
+		}
+	}
+	return refs
+}
+
+func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[string]outputFile, previous map[string]string, resolved map[string]stampdrive.Item, progress func(completed, total int, detail string)) (map[string]string, error) {
+	diagnostic.Log("collab", "outputs.sync_start", "folder_id", folderID)
+	if folderID == "" {
+		return nil, errors.New("project has no Current folder")
+	}
+	next := make(map[string]string, len(current))
+	total := len(current)
+	for key := range previous {
+		if _, ok := current[key]; !ok {
+			total++
+		}
+	}
+	completed := 0
+	for key, file := range current {
+		if progress != nil {
+			progress(completed, total, key)
+		}
+		item, ok := resolved[key]
 		if ok {
-			diagnostic.Log("collab", "outputs.update", "path", key, "file_id", item.ID, "bytes", len(data), "mime", mime)
-			_, err = drive.UpdateFile(ctx, item.ID, mime, bytes.NewReader(data))
-		} else {
-			diagnostic.Log("collab", "outputs.create", "path", key, "bytes", len(data), "mime", mime)
-			_, err = drive.CreateFile(ctx, folderID, strings.ReplaceAll(key, "/", " - "), mime, bytes.NewReader(data), map[string]string{"stamp_kind": "output", "stamp_path": key})
-		}
-		return err
-	}); err != nil {
-		return err
-	}
-	items, err := drive.Children(ctx, folderID)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		if path := item.Props["stamp_path"]; path != "" && !current[path] {
-			diagnostic.Log("collab", "outputs.delete", "path", path, "file_id", item.ID)
-			if err := drive.Trash(ctx, item.ID); err != nil {
-				return err
+			diagnostic.Log("collab", "outputs.update", "path", key, "file_id", item.ID, "bytes", len(file.Data), "mime", file.MIME)
+			updated, err := drive.UpdateFile(ctx, item.ID, file.MIME, bytes.NewReader(file.Data))
+			if err != nil {
+				return nil, err
 			}
+			if updated.ID == "" {
+				updated.ID = item.ID
+			}
+			next[key] = updated.ID
+		} else {
+			diagnostic.Log("collab", "outputs.create", "path", key, "bytes", len(file.Data), "mime", file.MIME)
+			created, err := drive.CreateFile(ctx, folderID, file.Name, file.MIME, bytes.NewReader(file.Data), map[string]string{"stamp_kind": "output", "stamp_path": key})
+			if err != nil {
+				return nil, err
+			}
+			next[key] = created.ID
 		}
+		completed++
 	}
-	diagnostic.Log("collab", "outputs.sync_complete", "files", len(current), "remote_items", len(items))
-	return nil
+	for key := range previous {
+		if _, ok := current[key]; ok {
+			continue
+		}
+		item, ok := resolved[key]
+		if !ok {
+			return nil, fmt.Errorf("published file %q was not authorized for deletion", key)
+		}
+		diagnostic.Log("collab", "outputs.delete", "path", key, "file_id", item.ID)
+		if err := drive.Trash(ctx, item.ID); err != nil {
+			return nil, err
+		}
+		completed++
+	}
+	if progress != nil {
+		progress(completed, total, "")
+	}
+	diagnostic.Log("collab", "outputs.sync_complete", "files", len(current))
+	return next, nil
+}
+
+func readOutputLedger(contents []byte) (map[string]string, error) {
+	reader, err := zip.NewReader(bytes.NewReader(contents), int64(len(contents)))
+	if err != nil {
+		return nil, fmt.Errorf("read output identities: %w", err)
+	}
+	for _, file := range reader.File {
+		if file.Name != ".stamp/outputs.json" {
+			continue
+		}
+		stream, err := file.Open()
+		if err != nil {
+			return nil, err
+		}
+		var ledger struct {
+			Files map[string]string `json:"files"`
+		}
+		err = json.NewDecoder(io.LimitReader(stream, 1<<20)).Decode(&ledger)
+		stream.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read output identities: %w", err)
+		}
+		return ledger.Files, nil
+	}
+	return nil, nil
 }
 
 func replaceWorkspace(root string, contents []byte) error {

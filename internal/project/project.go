@@ -32,6 +32,7 @@ type RemoteState struct {
 	BaseHash        string            `json:"baseHash,omitempty"`
 	WebURL          string            `json:"webUrl,omitempty"`
 	Files           map[string]string `json:"files,omitempty"`
+	Outputs         map[string]string `json:"outputs,omitempty"`
 }
 
 type ProjectStatus struct {
