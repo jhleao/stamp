@@ -63,6 +63,45 @@ type blockedOutputDrive struct {
 	writes int
 }
 
+type projectDrive struct {
+	items map[string]stampdrive.Item
+	data  []byte
+}
+
+func (f *projectDrive) Get(_ context.Context, id string) (stampdrive.Item, error) {
+	item, ok := f.items[id]
+	if !ok {
+		return stampdrive.Item{}, errors.New("missing Drive item")
+	}
+	return item, nil
+}
+func (f *projectDrive) Download(context.Context, string) ([]byte, error) { return f.data, nil }
+func (f *projectDrive) FindChildByProperty(_ context.Context, parent, key, value string) (stampdrive.Item, bool, error) {
+	if parent == "project" && key == "stamp_kind" && value == "current" {
+		return f.items["current"], true, nil
+	}
+	return stampdrive.Item{}, false, nil
+}
+func (f *projectDrive) EnsureFolder(context.Context, string, string, map[string]string) (stampdrive.Item, error) {
+	return stampdrive.Item{}, errors.New("unexpected write")
+}
+func (f *projectDrive) CreateFile(context.Context, string, string, string, io.Reader, map[string]string) (stampdrive.Item, error) {
+	return stampdrive.Item{}, errors.New("unexpected write")
+}
+func (f *projectDrive) UpdateFile(context.Context, string, string, io.Reader) (stampdrive.Item, error) {
+	return stampdrive.Item{}, errors.New("unexpected write")
+}
+func (f *projectDrive) UpdateNamedFile(context.Context, string, string, string, io.Reader) (stampdrive.Item, error) {
+	return stampdrive.Item{}, errors.New("unexpected write")
+}
+func (f *projectDrive) Trash(context.Context, string) error { return errors.New("unexpected write") }
+func (f *projectDrive) Retain(context.Context, stampdrive.Item) error {
+	return errors.New("unexpected write")
+}
+func (f *projectDrive) ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
+	return nil, errors.New("unexpected write")
+}
+
 func (f *blockedOutputDrive) ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
 	return nil, errors.New("published files were not authorized")
 }
@@ -116,6 +155,77 @@ func pullFixture(t *testing.T) (string, *fakeDrive) {
 		t.Fatal(err)
 	}
 	return root, &fakeDrive{item: stampdrive.Item{ID: "canonical", Version: "2"}, data: archive.Bytes()}
+}
+
+func TestRemoteStateForRequiresSameProjectAndDoesNotChangeLocalFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "local")
+	if _, err := project.Create(root, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	remote := filepath.Join(t.TempDir(), "remote")
+	if err := copyTree(root, remote); err != nil {
+		t.Fatal(err)
+	}
+	remoteFile := filepath.Join(remote, "documents", "remote.page.md")
+	if err := os.WriteFile(remoteFile, []byte("# Remote\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := bundle.Pack(remote, &archive); err != nil {
+		t.Fatal(err)
+	}
+	drive := &projectDrive{
+		items: map[string]stampdrive.Item{
+			"canonical": {ID: "canonical", Name: "Shared.stamp", CanEdit: true, Version: "7", Parents: []string{"project"}},
+			"project":   {ID: "project", Folder: true, CanEdit: true, WebURL: "https://drive.google.com/folder/project"},
+			"current":   {ID: "current", Folder: true, CanEdit: true},
+		},
+		data: archive.Bytes(),
+	}
+	state, err := RemoteStateFor(context.Background(), drive, root, "canonical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.FileID != "canonical" || state.CurrentFolderID != "current" || state.BaseVersion != "7" {
+		t.Fatalf("incomplete remote state: %+v", state)
+	}
+	if _, err := os.Stat(filepath.Join(root, "documents", "remote.page.md")); !os.IsNotExist(err) {
+		t.Fatalf("remote inspection changed local files: %v", err)
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	if _, err := project.Create(other, "Other"); err != nil {
+		t.Fatal(err)
+	}
+	archive.Reset()
+	if err := bundle.Pack(other, &archive); err != nil {
+		t.Fatal(err)
+	}
+	drive.data = archive.Bytes()
+	if _, err := RemoteStateFor(context.Background(), drive, root, "canonical"); err == nil || !strings.Contains(err.Error(), "is not this workspace") {
+		t.Fatalf("expected project identity refusal, got %v", err)
+	}
+}
+
+func copyTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, contents, 0o644)
+	})
 }
 
 func TestPullSafeRefusesDivergedWorkspace(t *testing.T) {

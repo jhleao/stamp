@@ -60,35 +60,9 @@ const (
 
 func Open(ctx context.Context, drive Drive, value, destination string) (Workspace, error) {
 	diagnostic.Log("collab", "clone.start", "selection", stampdrive.ID(value), "destination", destination)
-	item, err := drive.Get(ctx, stampdrive.ID(value))
+	canonical, folder, current, contents, err := inspectDriveProject(ctx, drive, value)
 	if err != nil {
 		return Workspace{}, err
-	}
-	var canonical, folder stampdrive.Item
-	if item.Folder {
-		diagnostic.Log("collab", "clone.selection", "type", "folder", "file_id", item.ID, "can_edit", item.CanEdit)
-		folder = item
-		if !item.CanEdit {
-			return Workspace{}, errors.New("the selected Drive folder is read-only; ask its owner for Editor access")
-		}
-		found, ok, err := drive.FindChildByProperty(ctx, item.ID, "stamp_kind", "canonical")
-		if err != nil {
-			return Workspace{}, err
-		}
-		if !ok {
-			return Workspace{}, errors.New("Drive folder is not a Stamp project, or its archive is not authorized; run stamp clone again and select the .stamp archive inside this folder")
-		}
-		canonical = found
-	} else {
-		diagnostic.Log("collab", "clone.selection", "type", "archive", "file_id", item.ID, "name", item.Name, "can_edit", item.CanEdit)
-		canonical = item
-		if len(item.Parents) == 0 {
-			return Workspace{}, errors.New("canonical project has no parent folder")
-		}
-		folder, err = drive.Get(ctx, item.Parents[0])
-		if err != nil {
-			return Workspace{}, err
-		}
 	}
 	if destination == "" {
 		destination = safeName(strings.TrimSuffix(canonical.Name, ".stamp"))
@@ -98,22 +72,11 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Workspace{}, err
 	}
-	contents, err := drive.Download(ctx, canonical.ID)
-	if err != nil {
-		return Workspace{}, err
-	}
 	if err := unpackNewWorkspace(contents, destination); err != nil {
 		return Workspace{}, err
 	}
 	if err := project.EnsureAgentCompatibility(destination); err != nil {
 		return Workspace{}, err
-	}
-	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
-	if err != nil {
-		return Workspace{}, err
-	}
-	if !ok {
-		return Workspace{}, errors.New("Drive project has no Current folder")
 	}
 	hashes, err := project.FileHashes(destination)
 	if err != nil {
@@ -133,6 +96,95 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	}
 	diagnostic.Log("collab", "clone.complete", "root", root, "version", state.BaseVersion, "files", len(hashes))
 	return Workspace{Root: root, State: state}, nil
+}
+
+// RemoteStateFor validates an existing Drive project and returns the complete
+// state needed to connect root to it. It never changes the local workspace.
+func RemoteStateFor(ctx context.Context, drive Drive, root, value string) (project.RemoteState, error) {
+	canonical, folder, current, contents, err := inspectDriveProject(ctx, drive, value)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	temporary, err := os.MkdirTemp("", "stamp-remote-")
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	defer os.RemoveAll(temporary)
+	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), temporary); err != nil {
+		return project.RemoteState{}, fmt.Errorf("validate remote project: %w", err)
+	}
+	localManifest, err := project.Load(root)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	remoteManifest, err := project.Load(temporary)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	if localManifest.ID != remoteManifest.ID {
+		return project.RemoteState{}, fmt.Errorf("selected Drive project %q is not this workspace (%q)", remoteManifest.Name, localManifest.Name)
+	}
+	hashes, err := project.FileHashes(temporary)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	outputs, err := readOutputLedger(contents)
+	if err != nil {
+		return project.RemoteState{}, err
+	}
+	return project.RemoteState{
+		FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID,
+		BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL,
+		Files: hashes, Outputs: outputs,
+	}, nil
+}
+
+func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampdrive.Item, stampdrive.Item, stampdrive.Item, []byte, error) {
+	item, err := drive.Get(ctx, stampdrive.ID(value))
+	if err != nil {
+		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+	}
+	var canonical, folder stampdrive.Item
+	if item.Folder {
+		diagnostic.Log("collab", "remote.selection", "type", "folder", "file_id", item.ID, "can_edit", item.CanEdit)
+		folder = item
+		if !item.CanEdit {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("the selected Drive folder is read-only; ask its owner for Editor access")
+		}
+		found, ok, err := drive.FindChildByProperty(ctx, item.ID, "stamp_kind", "canonical")
+		if err != nil {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+		}
+		if !ok {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("Drive folder is not a Stamp project, or its archive is not authorized; select the .stamp archive inside this folder")
+		}
+		canonical = found
+	} else {
+		diagnostic.Log("collab", "remote.selection", "type", "archive", "file_id", item.ID, "name", item.Name, "can_edit", item.CanEdit)
+		canonical = item
+		if !item.CanEdit {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("the selected .stamp file is read-only; ask its owner for Editor access")
+		}
+		if len(item.Parents) == 0 {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("canonical project has no parent folder")
+		}
+		folder, err = drive.Get(ctx, item.Parents[0])
+		if err != nil {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+		}
+	}
+	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
+	if err != nil {
+		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+	}
+	if !ok {
+		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("Drive project has no Current folder")
+	}
+	contents, err := drive.Download(ctx, canonical.ID)
+	if err != nil {
+		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+	}
+	return canonical, folder, current, contents, nil
 }
 
 func unpackNewWorkspace(contents []byte, destination string) error {

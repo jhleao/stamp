@@ -46,6 +46,19 @@ cd board-pack
 stamp studio
 ```
 
+To connect an existing local workspace to another copy of the same Stamp
+project in Drive:
+
+```sh
+stamp remote set
+# Choose the target project's .stamp file and confirm the new Drive location.
+```
+
+Stamp verifies the project identity and leaves every local file untouched. The
+next Push shows and publishes the local differences against the newly selected
+remote. It refuses to connect an unrelated project. Agents may use
+`stamp remote set --yes` only after reviewing the target printed by Stamp.
+
 Stamp requests only Google’s per-file `drive.file` permission. Picker makes the
 project grant explicit without exposing the rest of the user’s Drive. Picker
 shows only Stamp project archives, so select the `.stamp` file shared by the

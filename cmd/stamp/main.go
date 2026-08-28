@@ -99,6 +99,8 @@ func run(args []string) error {
 		return newCommand(args[1:])
 	case "clone":
 		return cloneCommand(args[1:])
+	case "remote":
+		return remoteCommand(args[1:])
 	case "pull":
 		return pullCommand(args[1:])
 	case "push":
@@ -417,6 +419,98 @@ func cloneCommand(args []string) error {
 	return nil
 }
 
+func remoteCommand(args []string) error {
+	if len(args) == 0 {
+		root, err := project.FindRoot(".")
+		if err != nil {
+			return err
+		}
+		state, err := project.ReadState(root)
+		if err != nil {
+			return err
+		}
+		if state.WebURL == "" {
+			return errors.New("workspace has no Google Drive remote")
+		}
+		fmt.Println(state.WebURL)
+		return nil
+	}
+	if args[0] != "set" {
+		return errors.New("usage: stamp remote [set [--dir <directory>] [--yes]]")
+	}
+	pos, opts, flags, err := parseArgs(args[1:], []string{"dir"}, []string{"yes"})
+	if err != nil {
+		return err
+	}
+	if len(pos) != 0 {
+		return errors.New("usage: stamp remote set [--dir <directory>] [--yes]")
+	}
+	root, err := project.FindRoot(defaultString(opts["dir"], "."))
+	if err != nil {
+		return err
+	}
+	oldState, err := project.ReadState(root)
+	if err != nil {
+		return err
+	}
+	id, err := stampdrive.PickRemoteArchive(context.Background())
+	if err != nil {
+		return err
+	}
+	drive, err := stampdrive.New(context.Background())
+	if err != nil {
+		return err
+	}
+	newState, err := collab.RemoteStateFor(context.Background(), drive, root, id)
+	if err != nil {
+		return err
+	}
+	localHashes, err := project.FileHashes(root)
+	if err != nil {
+		return err
+	}
+	changed := changedFileCount(localHashes, newState.Files)
+	fmt.Println("Reconnect Stamp workspace")
+	fmt.Printf("  From: %s\n", defaultString(oldState.WebURL, "not connected"))
+	fmt.Printf("  To:   %s\n", newState.WebURL)
+	fmt.Printf("  Local differences from new remote: %d files\n", changed)
+	fmt.Println("Local files will not be changed. The next Push will publish these differences to the new remote.")
+	if !flags["yes"] {
+		if !isTerminal(os.Stdin) {
+			return errors.New("confirmation requires a terminal; review the target and rerun with --yes")
+		}
+		ok, err := confirm(bufio.NewReader(os.Stdin), "Connect this workspace to the new remote?", false)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("remote unchanged")
+		}
+	}
+	if err := project.WriteState(root, newState); err != nil {
+		return err
+	}
+	fmt.Printf("Connected to %s\n", newState.WebURL)
+	return nil
+}
+
+func changedFileCount(left, right map[string]string) int {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	for name := range left {
+		seen[name] = struct{}{}
+	}
+	for name := range right {
+		seen[name] = struct{}{}
+	}
+	count := 0
+	for name := range seen {
+		if left[name] != right[name] {
+			count++
+		}
+	}
+	return count
+}
+
 func rememberProject(root string) {
 	if err := project.Remember(root); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: could not remember this workspace:", err)
@@ -636,6 +730,7 @@ Usage:
   stamp login | logout
   stamp new <directory> [--name <name>] [--choose-drive-folder]
   stamp clone [directory]
+  stamp remote [set [--dir <directory>] [--yes]]
   stamp pull [--incoming|--replace]
   stamp push [--message <text>] [--force-with-lease <version>]
   stamp studio [--dir <directory>] [--no-open]
