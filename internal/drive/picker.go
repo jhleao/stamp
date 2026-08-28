@@ -60,6 +60,22 @@ func PickProjectArchive(ctx context.Context) (string, error) {
 	})
 }
 
+// PickRemoteArchive selects the canonical archive that an existing local
+// workspace should use from now on.
+func PickRemoteArchive(ctx context.Context) (string, error) {
+	return pick(ctx, pickerRequest{
+		title:  "Choose the new .stamp remote",
+		prompt: "Choose the new remote’s .stamp file.",
+		mime:   "application/vnd.stamp+zip",
+		intro: &pickerIntro{
+			Title:  "Connect this workspace to another Drive location",
+			Body:   "Stamp will verify that the selected .stamp file belongs to this project. Your local files will stay exactly as they are.",
+			Steps:  []string{"Open the target project folder in Google Drive.", "Select its .stamp file—not the folder or a rendered PDF.", "After selection, review the old and new Drive locations before confirming."},
+			Action: "Choose the new .stamp remote",
+		},
+	})
+}
+
 // PickDestinationFolder asks where a new project should be created in Drive.
 func PickDestinationFolder(ctx context.Context) (string, error) {
 	return pick(ctx, pickerRequest{

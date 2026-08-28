@@ -50,6 +50,7 @@ stamp login | logout
 stamp setup
 stamp new <dir> [--name <name>] [--choose-drive-folder]
 stamp clone [dir]
+stamp remote [set [--dir <dir>] [--yes]]
 stamp pull [--incoming|--replace]
 stamp push [--message <text>] [--force-with-lease <version>]
 stamp studio [--dir <dir>] [--no-open]

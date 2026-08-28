@@ -230,7 +230,8 @@ func ReadState(root string) (RemoteState, error) {
 }
 
 func WriteState(root string, state RemoteState) error {
-	if err := os.MkdirAll(filepath.Join(root, ".stamp"), 0o755); err != nil {
+	directory := filepath.Join(root, ".stamp")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -238,7 +239,24 @@ func WriteState(root string, state RemoteState) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(root, ".stamp", "state.json"), data, 0o600)
+	temporary, err := os.CreateTemp(directory, ".state-*.json")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, filepath.Join(directory, "state.json"))
 }
 
 func Connected(root string) (bool, error) {
@@ -438,6 +456,11 @@ This workspace is a shared document pack. Keep the loop small:
 5. Use Studio's preview and inspect every affected page or slide. Match the
    established visual language and test both sparse and dense content.
 6. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
+
+If asked to change which Google Drive project a workspace uses, run
+` + "`stamp remote set`" + `. Select the target .stamp archive; never edit
+.stamp/state.json by hand. Stamp verifies that it is the same logical project
+and preserves all local files.
 
 The theme/ folder controls appearance. Read theme/README.md before changing it.
 Never edit outputs/ directly. If pull or push reports a conflict, preserve both
