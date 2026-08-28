@@ -1,9 +1,10 @@
 import { computed, signal } from "@preact/signals";
-import type { FileItem, FileSection, ProjectSnapshot, SyncDetails, SyncSnapshot } from "./types";
+import type { FileItem, FileSection, ProjectSnapshot, PushProgress, SyncDetails, SyncSnapshot } from "./types";
 
 export const project = signal<ProjectSnapshot | null>(null);
 export const sync = signal<SyncSnapshot | null>(null);
 export const syncReview = signal<SyncDetails | null>(null);
+export const pushProgress = signal<PushProgress | null>(null);
 export const section = signal<FileSection>("content");
 export const selectedPath = signal<string | null>(null);
 export const selectedFile = computed<FileItem | null>(() => project.value?.files.find((file) => file.path === selectedPath.value) || null);

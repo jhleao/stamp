@@ -64,6 +64,67 @@ type Item struct {
 	revision string
 }
 
+// FileRef describes a canonical published file. ID is empty only while an
+// older project is being upgraded to the output identity ledger.
+type FileRef struct {
+	Key  string `json:"key"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name"`
+}
+
+// ResolveFiles verifies access to canonical published files and opens one
+// constrained Picker when drive.file has not authorized them for this user.
+func (c *Client) ResolveFiles(ctx context.Context, folderID string, refs []FileRef) (map[string]Item, error) {
+	resolved := make(map[string]Item, len(refs))
+	var missing []FileRef
+	for _, ref := range refs {
+		if ref.ID == "" {
+			missing = append(missing, ref)
+			continue
+		}
+		item, err := c.Get(ctx, ref.ID)
+		if err != nil || !item.CanEdit {
+			missing = append(missing, ref)
+			continue
+		}
+		resolved[ref.Key] = item
+	}
+	if len(missing) == 0 {
+		return resolved, nil
+	}
+	files, err := pickFiles(ctx, pickerRequest{
+		title:    fmt.Sprintf("Select all %d published files, then click Select", len(missing)),
+		prompt:   fmt.Sprintf("Select all %d published files. Stamp verifies every file before Push.", len(missing)),
+		mime:     "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		parent:   folderID,
+		required: missing,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range missing {
+		var selected *pickedFile
+		for i := range files {
+			if (ref.ID != "" && files[i].ID == ref.ID) || (ref.ID == "" && files[i].Name == ref.Name) {
+				selected = &files[i]
+				break
+			}
+		}
+		if selected == nil {
+			return nil, fmt.Errorf("published file %q was not selected", ref.Name)
+		}
+		item, err := c.Get(ctx, selected.ID)
+		if err != nil {
+			return nil, fmt.Errorf("authorize %q: %w", ref.Name, err)
+		}
+		if !item.CanEdit {
+			return nil, fmt.Errorf("published file %q is read-only; ask its owner for Editor access", ref.Name)
+		}
+		resolved[ref.Key] = item
+	}
+	return resolved, nil
+}
+
 type OAuthFile struct {
 	Installed struct {
 		ClientID     string   `json:"client_id"`

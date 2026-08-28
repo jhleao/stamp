@@ -42,7 +42,7 @@ type Server struct {
 	origin      string
 	version     string
 	host        string
-	clients     map[chan string]struct{}
+	clients     map[chan serverEvent]struct{}
 	clientsMu   sync.Mutex
 	renderMu    sync.Mutex
 	lastChanges string
@@ -64,6 +64,11 @@ type fileItem struct {
 type pushRequest struct {
 	Message string `json:"message"`
 	Force   string `json:"forceWithLease"`
+}
+
+type serverEvent struct {
+	Name string
+	Data []byte
 }
 
 type pullRequest struct {
@@ -121,7 +126,7 @@ func Start(ctx context.Context, root string, openBrowser bool, version string) e
 	if err := theme.CompileIfNeeded(ctx, root); err != nil {
 		return err
 	}
-	server := &Server{root: root, token: token(), clients: map[chan string]struct{}{}, version: version}
+	server := &Server{root: root, token: token(), clients: map[chan serverEvent]struct{}{}, version: version}
 	listener, err := net.Listen("tcp", studioAddress)
 	if err != nil {
 		return fmt.Errorf("Studio needs %s; close the other Studio process and try again: %w", studioAddress, err)
@@ -855,7 +860,9 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err, http.StatusUnauthorized)
 		return
 	}
-	state, err := collab.Push(r.Context(), drive, s.root, request.Message, request.Force)
+	state, err := collab.PushWithProgress(r.Context(), drive, s.root, request.Message, request.Force, func(progress collab.PushProgress) {
+		s.broadcastJSON("push-progress", progress)
+	})
 	if err != nil {
 		s.writeError(w, err, http.StatusConflict)
 		return
@@ -922,7 +929,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Connection", "keep-alive")
-	client := make(chan string, 4)
+	client := make(chan serverEvent, 16)
 	s.clientsMu.Lock()
 	s.clients[client] = struct{}{}
 	s.clientsMu.Unlock()
@@ -936,7 +943,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case event := <-client:
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", event)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Name, event.Data)
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
@@ -972,6 +979,18 @@ func (s *Server) watch(ctx context.Context) {
 }
 
 func (s *Server) broadcast(event string) {
+	s.broadcastEvent(serverEvent{Name: event, Data: []byte("{}")})
+}
+
+func (s *Server) broadcastJSON(name string, value any) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	s.broadcastEvent(serverEvent{Name: name, Data: data})
+}
+
+func (s *Server) broadcastEvent(event serverEvent) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 	for client := range s.clients {

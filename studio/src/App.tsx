@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api";
 import {
-  connected, draftDirty, externalChange, notice, previewPath, previewRevision, previewStale, project, renderState, saveState, section,
+  connected, draftDirty, externalChange, notice, previewPath, previewRevision, previewStale, project, pushProgress, renderState, saveState, section,
   selectedFile, selectedPath, selectPreview, source, sourceShare, sync, syncReview, theme,
 } from "./state";
 import type { FileChange, FileItem, FileSection } from "./types";
@@ -398,9 +398,9 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
         </div>
         <div class="sync-status-row">
           <span class={`sync-status sync-${syncState || "checking"}`}>
-            {!connected.value ? "Disconnected" : refreshing ? `Checking ${backend}…` : syncState ? syncLabels[syncState] : `Checking ${backend}…`}
+            {pushProgress.value ? `${pushProgress.value.stage} · ${pushProgress.value.percent}%` : !connected.value ? "Disconnected" : refreshing ? `Checking ${backend}…` : syncState ? syncLabels[syncState] : `Checking ${backend}…`}
           </span>
-          <button class={`sync-refresh ${refreshing ? "is-refreshing" : ""}`} disabled={refreshing} aria-label={`Refresh ${backend} status`} title={`Refresh ${backend} status`} onClick={async () => {
+          <button class={`sync-refresh ${refreshing ? "is-refreshing" : ""}`} disabled={refreshing || Boolean(pushProgress.value)} aria-label={`Refresh ${backend} status`} title={`Refresh ${backend} status`} onClick={async () => {
             setRefreshing(true);
             try { await onRefreshSync(); } finally { setRefreshing(false); }
           }}><RefreshIcon /></button>
@@ -421,8 +421,8 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
       </div>
     </header>
     <div class="sync-actions">
-      <button class={`sync-button ${canPull ? syncState === "diverged" ? "is-attention" : "is-suggested" : ""}`} disabled={!canPull} onClick={onPull}><SyncIcon direction="pull" />Pull</button>
-      <button class={`sync-button ${canPush ? "is-suggested" : ""}`} disabled={!canPush} onClick={onPush}><SyncIcon direction="push" />Push</button>
+      <button class={`sync-button ${canPull ? syncState === "diverged" ? "is-attention" : "is-suggested" : ""}`} disabled={!canPull || Boolean(pushProgress.value)} onClick={onPull}><SyncIcon direction="pull" />Pull</button>
+      <button class={`sync-button ${canPush ? "is-suggested" : ""} ${pushProgress.value ? "is-working" : ""}`} disabled={!canPush || Boolean(pushProgress.value)} onClick={onPush}><SyncIcon direction="push" />{pushProgress.value ? `${pushProgress.value.percent}%` : "Push"}</button>
     </div>
     <div class="mt-3 grid grid-cols-2 bg-canvas p-0.5" role="tablist" aria-label="Project area">
       {(["content", "templates"] as const).map((item) => <button
@@ -594,7 +594,7 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
   const confirmation = useRef<HTMLInputElement>(null);
   const diverged = sync.value?.state === "diverged";
   const backend = "Google Drive";
-  return <dialog ref={dialog} class="stamp-dialog" onClose={(event) => event.currentTarget.querySelector("form")?.reset()}>
+  return <dialog ref={dialog} class="stamp-dialog" onCancel={(event) => { if (pushProgress.value) event.preventDefault(); }} onClose={(event) => event.currentTarget.querySelector("form")?.reset()}>
     <form method="dialog" class="p-6">
       <span class="dialog-kicker">Push to {backend}</span>
       <h2>{diverged ? `Replace the ${backend} version?` : "Share these local changes?"}</h2>
@@ -613,13 +613,18 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
         `PDFs and other generated outputs are rebuilt and mirrored to ${backend}.`,
         `The previous ${backend} revision remains recoverable through Stamp's source history.`,
       ]} />
+      {pushProgress.value && <div class="push-progress" role="status" aria-live="polite">
+        <div><strong>{pushProgress.value.stage}</strong><span>{pushProgress.value.percent}%</span></div>
+        <progress max="100" value={pushProgress.value.percent} />
+        {pushProgress.value.detail && <small>{pushProgress.value.detail}</small>}
+      </div>}
       <label class="dialog-field"><span>Version note</span><input ref={message} required placeholder="Updated the quarterly summary" /></label>
       {diverged && <label class="dialog-confirm"><input ref={confirmation} type="checkbox" required /><span>I reviewed the {backend} drift and want to replace that version.</span></label>}
-      <div class="dialog-actions"><button type="button" onClick={() => dialog.current?.close("cancel")}>Cancel</button><button type="button" class="primary" onClick={() => {
+      <div class="dialog-actions"><button type="button" disabled={Boolean(pushProgress.value)} onClick={() => dialog.current?.close("cancel")}>Cancel</button><button type="button" class="primary" disabled={Boolean(pushProgress.value)} onClick={() => {
         if (!message.current?.value.trim()) return message.current?.reportValidity();
         if (diverged && !confirmation.current?.checked) return confirmation.current?.reportValidity();
         onConfirm(message.current?.value.trim() || "", diverged ? sync.value?.remoteVersion || "" : "");
-      }}>{diverged ? `Replace ${backend} version` : "Push version"}</button></div>
+      }}>{pushProgress.value ? `${pushProgress.value.stage} · ${pushProgress.value.percent}%` : diverged ? `Replace ${backend} version` : "Push version"}</button></div>
     </form>
   </dialog>;
 }
@@ -942,6 +947,15 @@ export function App() {
     } catch (error) { showNotice((error as Error).message, true); }
   };
 
+  const runPush = async (message: string, forceWithLease: string) => {
+    pushProgress.value = { stage: "Saving changes", completed: 0, total: 0, percent: 0 };
+    try {
+      await runSyncAction(() => api.push(message, forceWithLease), pushDialog.current);
+    } finally {
+      pushProgress.value = null;
+    }
+  };
+
   const openSyncDialog = (dialog: HTMLDialogElement | null) => {
     if (!dialog) return;
     syncReview.value = null;
@@ -971,6 +985,9 @@ export function App() {
     const events = new EventSource("api/events");
     events.addEventListener("ready", () => { connected.value = true; });
     events.addEventListener("change", () => refresh(true).catch(() => { connected.value = false; }));
+    events.addEventListener("push-progress", (event) => {
+      pushProgress.value = JSON.parse((event as MessageEvent).data);
+    });
     events.addEventListener("error", () => { connected.value = false; });
     return () => events.close();
   }, []);
@@ -1011,7 +1028,7 @@ export function App() {
           if (!focused && externalChange.value && !draftDirty.value) reloadSource().catch((error) => showNotice(error.message, true));
         }} />
     </main>
-    <PushDialog dialog={pushDialog} onConfirm={(message, forceWithLease) => runSyncAction(() => api.push(message, forceWithLease), pushDialog.current)} />
+    <PushDialog dialog={pushDialog} onConfirm={runPush} />
     <PullDialog dialog={pullDialog} onConfirm={() => runSyncAction(api.pull, pullDialog.current)} />
     <DeleteFileDialog dialog={deleteDialog} target={deleteTarget} onConfirm={deleteFile} />
     {notice.value && <aside class={`notice ${notice.value.error ? "is-error" : ""}`} role="status">{notice.value.message}</aside>}

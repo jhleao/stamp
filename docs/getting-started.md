@@ -47,3 +47,6 @@ stamp studio
 
 Pull refuses to replace local edits when Drive also changed. Push uses an exact
 Drive revision lease and refuses to overwrite a newer shared version.
+The first Push may ask you to connect the generated files already in `Current`.
+Select all files shown. Stamp verifies the exact set before it writes and then
+remembers their Drive identities in the shared project.
