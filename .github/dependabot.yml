@@ -4,13 +4,37 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+    ignore:
+      # chromedp 0.16 raises Stamp's minimum Go version to 1.26. Revisit with
+      # the next deliberate toolchain upgrade rather than via a weekly batch.
+      - dependency-name: github.com/chromedp/chromedp
+        update-types:
+          - version-update:semver-minor
 
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    groups:
+      npm-packages:
+        patterns:
+          - "*"
+    ignore:
+      # Monaco 0.54+ changed its package exports and currently regresses the
+      # Studio bundle. Stay on the patched 0.53 line until that settles.
+      - dependency-name: monaco-editor
+        update-types:
+          - version-update:semver-minor
