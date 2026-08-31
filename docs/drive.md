@@ -59,6 +59,11 @@ next Push shows and publishes the local differences against the newly selected
 remote. It refuses to connect an unrelated project. Agents may use
 `stamp remote set --yes` only after reviewing the target printed by Stamp.
 
+For a project created by another account, Google may ask for one additional
+one-time grant. Stamp opens a second guided Picker: select the `Current` folder
+beside the `.stamp` archive. This lets Stamp update the shared PDFs and
+spreadsheets in place without requesting access to the rest of Drive.
+
 Stamp requests only Google’s per-file `drive.file` permission. Picker makes the
 project grant explicit without exposing the rest of the user’s Drive. Picker
 shows only Stamp project archives, so select the `.stamp` file shared by the
