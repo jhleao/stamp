@@ -64,8 +64,10 @@ type blockedOutputDrive struct {
 }
 
 type projectDrive struct {
-	items map[string]stampdrive.Item
-	data  []byte
+	items             map[string]stampdrive.Item
+	data              []byte
+	hideCurrent       bool
+	currentAuthorized bool
 }
 
 func (f *projectDrive) Get(_ context.Context, id string) (stampdrive.Item, error) {
@@ -77,10 +79,14 @@ func (f *projectDrive) Get(_ context.Context, id string) (stampdrive.Item, error
 }
 func (f *projectDrive) Download(context.Context, string) ([]byte, error) { return f.data, nil }
 func (f *projectDrive) FindChildByProperty(_ context.Context, parent, key, value string) (stampdrive.Item, bool, error) {
-	if parent == "project" && key == "stamp_kind" && value == "current" {
+	if !f.hideCurrent && parent == "project" && key == "stamp_kind" && value == "current" {
 		return f.items["current"], true, nil
 	}
 	return stampdrive.Item{}, false, nil
+}
+func (f *projectDrive) AuthorizeCurrentFolder(context.Context, stampdrive.Item) (stampdrive.Item, error) {
+	f.currentAuthorized = true
+	return f.items["current"], nil
 }
 func (f *projectDrive) EnsureFolder(context.Context, string, string, map[string]string) (stampdrive.Item, error) {
 	return stampdrive.Item{}, errors.New("unexpected write")
@@ -180,7 +186,8 @@ func TestRemoteStateForRequiresSameProjectAndDoesNotChangeLocalFiles(t *testing.
 			"project":   {ID: "project", Folder: true, CanEdit: true, WebURL: "https://drive.google.com/folder/project"},
 			"current":   {ID: "current", Folder: true, CanEdit: true},
 		},
-		data: archive.Bytes(),
+		data:        archive.Bytes(),
+		hideCurrent: true,
 	}
 	state, err := RemoteStateFor(context.Background(), drive, root, "canonical")
 	if err != nil {
@@ -188,6 +195,9 @@ func TestRemoteStateForRequiresSameProjectAndDoesNotChangeLocalFiles(t *testing.
 	}
 	if state.FileID != "canonical" || state.CurrentFolderID != "current" || state.BaseVersion != "7" {
 		t.Fatalf("incomplete remote state: %+v", state)
+	}
+	if !drive.currentAuthorized {
+		t.Fatal("remote did not request authorization for an undiscoverable Current folder")
 	}
 	if _, err := os.Stat(filepath.Join(root, "documents", "remote.page.md")); !os.IsNotExist(err) {
 		t.Fatalf("remote inspection changed local files: %v", err)

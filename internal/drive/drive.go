@@ -419,6 +419,35 @@ func (c *Client) FindChildByProperty(ctx context.Context, parentID, key, value s
 	return items[0], true, nil
 }
 
+// AuthorizeCurrentFolder asks the user for the narrow drive.file grant needed
+// when a collaborator cannot discover a sibling folder created by its owner.
+func (c *Client) AuthorizeCurrentFolder(ctx context.Context, projectFolder Item) (Item, error) {
+	id, err := PickCurrentFolder(ctx, projectFolder.ID)
+	if err != nil {
+		return Item{}, err
+	}
+	item, err := c.Get(ctx, id)
+	if err != nil {
+		return Item{}, err
+	}
+	if !item.Folder || item.Name != "Current" || !hasParent(item, projectFolder.ID) {
+		return Item{}, errors.New("selected folder is not this project’s Current folder")
+	}
+	if !item.CanEdit {
+		return Item{}, errors.New("the selected Current folder is read-only; ask its owner for Editor access")
+	}
+	return item, nil
+}
+
+func hasParent(item Item, parentID string) bool {
+	for _, id := range item.Parents {
+		if id == parentID {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) search(ctx context.Context, query string) ([]Item, error) {
 	diagnostic.Log("drive", "files.search", "query", query)
 	var result []Item
