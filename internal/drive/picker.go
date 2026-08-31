@@ -85,6 +85,23 @@ func PickDestinationFolder(ctx context.Context) (string, error) {
 	})
 }
 
+// PickCurrentFolder grants Stamp access to a shared project's Current folder
+// when drive.file cannot discover a sibling created by another account.
+func PickCurrentFolder(ctx context.Context, projectFolderID string) (string, error) {
+	return pick(ctx, pickerRequest{
+		title:   "Choose this project’s Current folder",
+		prompt:  "Choose the Current folder inside this Stamp project.",
+		folders: true,
+		parent:  projectFolderID,
+		intro: &pickerIntro{
+			Title:  "Connect the published documents",
+			Body:   "Google Drive requires a one-time permission for folders created by another collaborator. Stamp needs the Current folder so it can update PDFs and spreadsheets in place.",
+			Steps:  []string{"Open the same project folder that contains the .stamp file you just selected.", "Select the folder named Current.", "Stamp will verify its name and location before changing anything."},
+			Action: "Choose the Current folder",
+		},
+	})
+}
+
 func pick(ctx context.Context, request pickerRequest) (string, error) {
 	files, err := pickFiles(ctx, request)
 	if err != nil {
@@ -272,7 +289,7 @@ function openPicker() {
       if (data.action === google.picker.Action.PICKED) {
         const files = data.docs.map(doc => ({id:doc.id, name:doc.name}));
         const unmatched = required.filter(want => !files.some(got => want.id ? got.id === want.id : got.name === want.name));
-        if (files.length !== required.length || unmatched.length) {
+        if (required.length > 0 && (files.length !== required.length || unmatched.length)) {
           alert('Select exactly the ' + required.length + ' published file' + (required.length === 1 ? '' : 's') + ' shown in this folder. Stamp will not create duplicates.');
           picker.setVisible(true);
           return;

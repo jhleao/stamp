@@ -52,6 +52,10 @@ type Drive interface {
 	ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error)
 }
 
+type currentFolderAuthorizer interface {
+	AuthorizeCurrentFolder(context.Context, stampdrive.Item) (stampdrive.Item, error)
+}
+
 const (
 	PullSafe     PullMode = "safe"
 	PullIncoming PullMode = "incoming"
@@ -178,7 +182,14 @@ func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampd
 		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
 	}
 	if !ok {
-		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("Drive project has no Current folder")
+		authorizer, supported := drive.(currentFolderAuthorizer)
+		if !supported {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, errors.New("Drive project has no Current folder")
+		}
+		current, err = authorizer.AuthorizeCurrentFolder(ctx, folder)
+		if err != nil {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, fmt.Errorf("connect the project’s Current folder: %w", err)
+		}
 	}
 	contents, err := drive.Download(ctx, canonical.ID)
 	if err != nil {
