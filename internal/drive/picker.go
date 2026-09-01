@@ -8,12 +8,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jhleao/stamp/internal/diagnostic"
+	"golang.org/x/oauth2"
 )
 
 const pickerAppID = "174648149574"
@@ -29,6 +33,7 @@ type pickerRequest struct {
 	parent   string
 	required []FileRef
 	intro    *pickerIntro
+	handoff  bool
 }
 
 type pickerIntro struct {
@@ -43,18 +48,235 @@ type pickedFile struct {
 	Name string `json:"name"`
 }
 
+type authorizationItem struct {
+	ID   string
+	Name string
+}
+
+const exactPickerBatchSize = 75
+
+var pickerHandoff struct {
+	sync.Mutex
+	next chan string
+}
+
+func registerPickerHandoff() chan string {
+	pickerHandoff.Lock()
+	defer pickerHandoff.Unlock()
+	pickerHandoff.next = make(chan string, 1)
+	return pickerHandoff.next
+}
+
+func sendPickerHandoff(next string) bool {
+	pickerHandoff.Lock()
+	channel := pickerHandoff.next
+	pickerHandoff.next = nil
+	pickerHandoff.Unlock()
+	if channel == nil {
+		return false
+	}
+	channel <- next
+	return true
+}
+
+// AuthorizeProjectItems grants drive.file access to the project's known
+// folders and rendered files. Google displays only these exact IDs, flattened
+// into a single multi-select list, so hierarchy does not multiply the number
+// of onboarding steps.
+func (c *Client) AuthorizeProjectItems(ctx context.Context, folders []FolderRef, files []FileRef) error {
+	items := make([]authorizationItem, 0, len(folders)+len(files))
+	seen := map[string]bool{}
+	for _, folder := range folders {
+		if folder.ID != "" && !seen[folder.ID] {
+			seen[folder.ID] = true
+			items = append(items, authorizationItem{ID: folder.ID, Name: folder.Path + "/"})
+		}
+	}
+	for _, file := range files {
+		if file.ID != "" && !seen[file.ID] {
+			seen[file.ID] = true
+			items = append(items, authorizationItem{ID: file.ID, Name: file.Name})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	missing := items
+	if os.Getenv("STAMP_FORCE_PROJECT_AUTHORIZATION") == "" {
+		missing = nil
+		for _, item := range items {
+			if _, err := c.Get(ctx, item.ID); err != nil {
+				missing = append(missing, item)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		sendPickerHandoff("http://localhost:57184/done")
+		return nil
+	}
+	for start := 0; start < len(missing); start += exactPickerBatchSize {
+		end := min(start+exactPickerBatchSize, len(missing))
+		if err := authorizeExactIDs(ctx, missing[start:end], start/exactPickerBatchSize+1, (len(missing)+exactPickerBatchSize-1)/exactPickerBatchSize); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func authorizeExactIDs(ctx context.Context, items []authorizationItem, batch, batches int) error {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	config, clientID, err := oauthConfig()
+	if err != nil {
+		return err
+	}
+	existing, err := loadToken(clientID)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("open project authorization: %w", err)
+	}
+	defer listener.Close()
+	config.RedirectURL = "http://" + listener.Addr().String() + "/oauth/callback"
+	state := randomToken()
+	verifier := oauth2.GenerateVerifier()
+	authURL, err := url.Parse(config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce, oauth2.S256ChallengeOption(verifier)))
+	if err != nil {
+		return err
+	}
+	query := authURL.Query()
+	query.Set("trigger_onepick", "true")
+	query.Set("allow_multiple", "true")
+	query.Set("allow_folder_selection", "true")
+	query.Set("file_ids", strings.Join(ids, ","))
+	query.Set("mimetypes", "application/vnd.google-apps.folder,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	authURL.RawQuery = query.Encode()
+
+	type result struct {
+		code string
+		ids  []string
+		err  error
+	}
+	completed := make(chan result, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, exactPickerIntro(authURL.String(), items, batch, batches))
+	})
+	mux.HandleFunc("GET /oauth/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != state {
+			http.Error(w, "Invalid Stamp authorization response.", http.StatusBadRequest)
+			return
+		}
+		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+			completed <- result{err: fmt.Errorf("Google Drive authorization was denied: %s", oauthErr)}
+			http.Error(w, oauthErr, http.StatusBadRequest)
+			return
+		}
+		picked := strings.Split(strings.TrimSpace(r.URL.Query().Get("picked_file_ids")), ",")
+		if len(picked) == 1 && picked[0] == "" {
+			picked = nil
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><title>Stamp connected</title><style>:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0f1113;color:#e6e8ea}body{margin:0;min-height:100vh;display:grid;place-items:center}p{color:#a4a9af}</style><main><h1>Project connected</h1><p>You can return to Stamp.</p></main><script>setTimeout(()=>window.close(),900)</script>`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		completed <- result{code: r.URL.Query().Get("code"), ids: picked}
+	})
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go server.Serve(listener)
+	introURL := "http://" + listener.Addr().String() + "/"
+	if !sendPickerHandoff(introURL) {
+		if err := exec.Command("open", introURL).Start(); err != nil {
+			return fmt.Errorf("open project authorization: %w", err)
+		}
+	}
+	select {
+	case selected := <-completed:
+		go shutdownAfter(server, 3*time.Second)
+		if selected.err != nil {
+			return selected.err
+		}
+		if !sameIDs(ids, selected.ids) {
+			return fmt.Errorf("select all %d project items before continuing", len(ids))
+		}
+		token, err := config.Exchange(diagnostic.HTTPContext(ctx, "google-oauth"), selected.code, oauth2.VerifierOption(verifier))
+		if err != nil {
+			return fmt.Errorf("exchange project authorization: %w", err)
+		}
+		if token.RefreshToken == "" {
+			token.RefreshToken = existing.RefreshToken
+		}
+		return saveToken(clientID, token)
+	case <-time.After(5 * time.Minute):
+		_ = server.Shutdown(context.Background())
+		return errors.New("Google Drive project authorization timed out")
+	case <-ctx.Done():
+		_ = server.Shutdown(context.Background())
+		return ctx.Err()
+	}
+}
+
+func sameIDs(want, got []string) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	selected := make(map[string]bool, len(got))
+	for _, id := range got {
+		selected[id] = true
+	}
+	for _, id := range want {
+		if !selected[id] {
+			return false
+		}
+	}
+	return true
+}
+
+func shutdownAfter(server *http.Server, delay time.Duration) {
+	time.Sleep(delay)
+	_ = server.Shutdown(context.Background())
+}
+
+func exactPickerIntro(authURL string, items []authorizationItem, batch, batches int) string {
+	href, _ := json.Marshal(authURL)
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	namesJSON, _ := json.Marshal(names)
+	progress := ""
+	if batches > 1 {
+		progress = fmt.Sprintf(" Batch %d of %d.", batch, batches)
+	}
+	return `<!doctype html><meta charset="utf-8"><title>Connect Stamp project</title>
+<style>:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0f1113;color:#e6e8ea}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:32px}main{width:min(620px,100%);border:1px solid #2b2e32;background:#15181b;padding:32px}h1{margin:0 0 12px;font-size:22px}p{color:#a4a9af;line-height:1.55}.steps{margin:20px 0;padding-left:22px;color:#d1d4d7;line-height:1.7}.files{margin:18px 0 24px;border:1px solid #2b2e32;max-height:220px;overflow:auto;list-style:none;padding:0}.files li{padding:8px 11px;border-bottom:1px solid #24272b;font:13px ui-monospace,SFMono-Regular,monospace}.files li:last-child{border-bottom:0}a{display:block;text-align:center;border:1px solid #e6e8ea;background:#e6e8ea;color:#111;padding:11px 14px;font-weight:600;text-decoration:none}</style>
+<main><h1>Connect this Stamp project</h1><p>Stamp needs one-time access to ` + strconv.Itoa(len(items)) + ` project items so it can update published files in place.` + progress + `</p><ol class="steps"><li>Open the exact project-item set below.</li><li>Press <strong>⌘A</strong> to select everything shown, then click <strong>Select</strong>.</li></ol><ul class="files" id="files"></ul><a id="continue">Open project items</a></main>
+<script>const names=` + string(namesJSON) + `;document.getElementById('files').innerHTML=names.map(name=>'<li>'+name.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</li>').join('');document.getElementById('continue').href=` + string(href) + `</script>`
+}
+
 // PickProjectArchive asks the signed-in user to authorize a shared Stamp
 // project's canonical archive. Authorizing the archive gives the app access
 // under drive.file without exposing unrelated Drive content.
 func PickProjectArchive(ctx context.Context) (string, error) {
 	return pick(ctx, pickerRequest{
-		title:  "Choose a .stamp project file",
-		prompt: "Choose the project’s .stamp file.",
-		mime:   "application/vnd.stamp+zip",
+		title:   "Choose a .stamp project file",
+		prompt:  "Choose the project’s .stamp file.",
+		mime:    "application/vnd.stamp+zip",
+		handoff: true,
 		intro: &pickerIntro{
-			Title:  "Choose the shared Stamp project",
-			Body:   "A Stamp project is stored in Google Drive as one .stamp file. Select that file—not its folder or a rendered PDF—to create your local working copy.",
-			Steps:  []string{"Open the shared project folder in Google Drive.", "Select the file whose name ends in .stamp, then click Select."},
+			Title: "Connect the shared Stamp project",
+			Body:  "Clone is the complete one-time setup for this project. Stamp verifies the source archive, its published folders, and every existing rendered file before creating your local working copy.",
+			Steps: []string{
+				"Select the file whose name ends in .stamp—not its folder or a rendered PDF.",
+				"If Google asks, follow Stamp’s checklist to connect Current, its folders, and the published files inside them.",
+				"Stamp creates the local workspace only after the complete project is connected.",
+			},
 			Action: "Choose a .stamp project file",
 		},
 	})
@@ -102,6 +324,21 @@ func PickCurrentFolder(ctx context.Context, projectFolderID string) (string, err
 	})
 }
 
+func PickPublishedFolder(ctx context.Context, parentID, name string) (string, error) {
+	return pick(ctx, pickerRequest{
+		title:   "Choose the “" + name + "” folder",
+		prompt:  "Choose “" + name + "” to continue connecting this project.",
+		folders: true,
+		parent:  parentID,
+		intro: &pickerIntro{
+			Title:  "Connect published folder",
+			Body:   "Stamp needs one-time access to the “" + name + "” folder and the published files inside it.",
+			Steps:  []string{"Open the folder shown by Stamp.", "Select the folder named “" + name + "”.", "Stamp verifies its name and location before continuing."},
+			Action: "Choose “" + name + "”",
+		},
+	})
+}
+
 func pick(ctx context.Context, request pickerRequest) (string, error) {
 	files, err := pickFiles(ctx, request)
 	if err != nil {
@@ -144,10 +381,17 @@ func pickFiles(ctx context.Context, request pickerRequest) ([]pickedFile, error)
 		done(err)
 		return nil, fmt.Errorf("open Google Picker on localhost:57184: %w", err)
 	}
-	defer listener.Close()
+	if !request.handoff {
+		defer listener.Close()
+	}
 
 	selection := make(chan []pickedFile, 1)
+	var handoff chan string
+	if request.handoff {
+		handoff = registerPickerHandoff()
+	}
 	mux := http.NewServeMux()
+	var server *http.Server
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src https://apis.google.com 'unsafe-inline'; frame-src https://docs.google.com https://drive.google.com; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
@@ -175,14 +419,36 @@ func pickFiles(ctx context.Context, request pickerRequest) ([]pickedFile, error)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	mux.HandleFunc("GET /handoff", func(w http.ResponseWriter, _ *http.Request) {
+		if handoff == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		select {
+		case next := <-handoff:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"url": next})
+			go shutdownAfter(server, 3*time.Second)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	mux.HandleFunc("GET /done", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><title>Stamp connected</title><style>:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0f1113;color:#e6e8ea}body{margin:0;min-height:100vh;display:grid;place-items:center}p{color:#a4a9af}</style><main><h1>Project connected</h1><p>You can return to Stamp.</p></main><script>setTimeout(()=>window.close(),900)</script>`)
+	})
+	server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
 	url := "http://localhost:57184/"
 	if err := exec.Command("open", url).Start(); err != nil {
 		done(err)
 		return nil, fmt.Errorf("open Google Picker: %w", err)
 	}
-	defer server.Shutdown(context.Background())
+	if !request.handoff {
+		defer server.Shutdown(context.Background())
+	} else {
+		go shutdownAfter(server, 5*time.Minute)
+	}
 	select {
 	case files := <-selection:
 		if len(files) == 0 {
@@ -217,6 +483,7 @@ func pickerHTML(accessToken, developerKey string, request pickerRequest) string 
 	}
 	requiredJSON, _ := json.Marshal(required)
 	introJSON, _ := json.Marshal(request.intro)
+	handoffJSON, _ := json.Marshal(request.handoff)
 	return `<!doctype html>
 <meta charset="utf-8">
 <title>` + string(titleJSON) + `</title>
@@ -252,6 +519,7 @@ const mime = ` + string(mimeJSON) + `;
 const parent = ` + string(parentJSON) + `;
 const required = ` + string(requiredJSON) + `;
 const configuredIntro = ` + string(introJSON) + `;
+const handoff = ` + string(handoffJSON) + `;
 document.getElementById('prompt').textContent = prompt;
 const migration = required.length > 0;
 const intro = migration ? {
@@ -269,7 +537,16 @@ if (intro) {
 }
 function finish(path, body) {
   fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body || {})})
-    .finally(() => window.close());
+    .then(() => {
+      if (!handoff) { window.close(); return; }
+      document.body.innerHTML = '<main><strong>Preparing project access…</strong><p>Stamp is verifying the project and will continue here automatically.</p></main>';
+      const wait = () => fetch('/handoff').then(async response => {
+        if (response.status === 204) { setTimeout(wait, 250); return; }
+        const result = await response.json();
+        window.location.assign(result.url);
+      }).catch(() => setTimeout(wait, 500));
+      wait();
+    });
 }
 function openPicker() {
   const view = folders

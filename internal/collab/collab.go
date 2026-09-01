@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,11 +51,17 @@ type Drive interface {
 	UpdateNamedFile(context.Context, string, string, string, io.Reader) (stampdrive.Item, error)
 	Trash(context.Context, string) error
 	Retain(context.Context, stampdrive.Item) error
+	MoveFile(context.Context, stampdrive.Item, string, string) (stampdrive.Item, error)
+	ResolveFolders(context.Context, string, []stampdrive.FolderRef) (map[string]stampdrive.Item, error)
 	ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error)
 }
 
 type currentFolderAuthorizer interface {
 	AuthorizeCurrentFolder(context.Context, stampdrive.Item) (stampdrive.Item, error)
+}
+
+type projectItemAuthorizer interface {
+	AuthorizeProjectItems(context.Context, []stampdrive.FolderRef, []stampdrive.FileRef) error
 }
 
 const (
@@ -67,6 +75,17 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	canonical, folder, current, contents, err := inspectDriveProject(ctx, drive, value)
 	if err != nil {
 		return Workspace{}, err
+	}
+	if err := validateRemoteProject(contents); err != nil {
+		return Workspace{}, err
+	}
+	ledger, err := readOutputLedger(contents)
+	if err != nil {
+		return Workspace{}, err
+	}
+	ledger, err = authorizePublishedOutputs(ctx, drive, current.ID, ledger)
+	if err != nil {
+		return Workspace{}, fmt.Errorf("connect published files before cloning: %w", err)
 	}
 	if destination == "" {
 		destination = safeName(strings.TrimSuffix(canonical.Name, ".stamp"))
@@ -86,11 +105,7 @@ func Open(ctx context.Context, drive Drive, value, destination string) (Workspac
 	if err != nil {
 		return Workspace{}, err
 	}
-	outputs, err := readOutputLedger(contents)
-	if err != nil {
-		return Workspace{}, err
-	}
-	state := project.RemoteState{FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID, BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL, Files: hashes, Outputs: outputs}
+	state := project.RemoteState{FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID, BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL, Files: hashes, Outputs: ledger.Files, OutputFolders: ledger.Folders}
 	if err := project.WriteState(destination, state); err != nil {
 		return Workspace{}, err
 	}
@@ -109,14 +124,11 @@ func RemoteStateFor(ctx context.Context, drive Drive, root, value string) (proje
 	if err != nil {
 		return project.RemoteState{}, err
 	}
-	temporary, err := os.MkdirTemp("", "stamp-remote-")
+	temporary, err := unpackRemoteProject(contents)
 	if err != nil {
 		return project.RemoteState{}, err
 	}
 	defer os.RemoveAll(temporary)
-	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), temporary); err != nil {
-		return project.RemoteState{}, fmt.Errorf("validate remote project: %w", err)
-	}
 	localManifest, err := project.Load(root)
 	if err != nil {
 		return project.RemoteState{}, err
@@ -132,15 +144,78 @@ func RemoteStateFor(ctx context.Context, drive Drive, root, value string) (proje
 	if err != nil {
 		return project.RemoteState{}, err
 	}
-	outputs, err := readOutputLedger(contents)
+	ledger, err := readOutputLedger(contents)
 	if err != nil {
 		return project.RemoteState{}, err
+	}
+	ledger, err = authorizePublishedOutputs(ctx, drive, current.ID, ledger)
+	if err != nil {
+		return project.RemoteState{}, fmt.Errorf("connect published files before changing remotes: %w", err)
 	}
 	return project.RemoteState{
 		FileID: canonical.ID, ProjectFolderID: folder.ID, CurrentFolderID: current.ID,
 		BaseVersion: canonical.Version, BaseHash: hash(contents), WebURL: folder.WebURL,
-		Files: hashes, Outputs: outputs,
+		Files: hashes, Outputs: ledger.Files, OutputFolders: ledger.Folders,
 	}, nil
+}
+
+type outputLedger struct {
+	Layout          int               `json:"layout,omitempty"`
+	CurrentFolderID string            `json:"currentFolderId,omitempty"`
+	Files           map[string]string `json:"files"`
+	Folders         map[string]string `json:"folders,omitempty"`
+}
+
+func authorizePublishedOutputs(ctx context.Context, drive Drive, currentFolderID string, ledger outputLedger) (outputLedger, error) {
+	fileRefs := outputRefs(nil, ledger.Files, ledger.Folders, currentFolderID)
+	if authorizer, ok := drive.(projectItemAuthorizer); ok {
+		folders := folderRefs(ledger.Folders)
+		if currentFolderID != "" {
+			folders = append([]stampdrive.FolderRef{{Path: ".", ID: currentFolderID}}, folders...)
+		}
+		if err := authorizer.AuthorizeProjectItems(ctx, folders, fileRefs); err != nil {
+			return outputLedger{}, err
+		}
+	}
+	folders, err := drive.ResolveFolders(ctx, currentFolderID, folderRefs(ledger.Folders))
+	if err != nil {
+		return outputLedger{}, err
+	}
+	if ledger.Folders == nil {
+		ledger.Folders = map[string]string{}
+	}
+	for folderPath, item := range folders {
+		ledger.Folders[folderPath] = item.ID
+	}
+	refs := outputRefs(nil, ledger.Files, ledger.Folders, currentFolderID)
+	for i := range refs {
+		directory := path.Dir(refs[i].Key)
+		if _, nested := ledger.Folders[directory]; nested {
+			folder, ok := folders[directory]
+			if !ok || folder.ID == "" {
+				return outputLedger{}, fmt.Errorf("published file %q has no verified folder", refs[i].Key)
+			}
+			refs[i].FolderID = folder.ID
+		}
+	}
+	if len(refs) == 0 {
+		return ledger, nil
+	}
+	resolved, err := drive.ResolveFiles(ctx, currentFolderID, refs)
+	if err != nil {
+		return outputLedger{}, err
+	}
+	if ledger.Files == nil {
+		ledger.Files = map[string]string{}
+	}
+	for _, ref := range refs {
+		item, ok := resolved[ref.Key]
+		if !ok || item.ID == "" {
+			return outputLedger{}, fmt.Errorf("published file %q was not verified", ref.Name)
+		}
+		ledger.Files[ref.Key] = item.ID
+	}
+	return ledger, nil
 }
 
 func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampdrive.Item, stampdrive.Item, stampdrive.Item, []byte, error) {
@@ -177,9 +252,23 @@ func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampd
 			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
 		}
 	}
+	contents, err := drive.Download(ctx, canonical.ID)
+	if err != nil {
+		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+	}
 	current, ok, err := drive.FindChildByProperty(ctx, folder.ID, "stamp_kind", "current")
 	if err != nil {
 		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
+	}
+	if !ok {
+		ledger, ledgerErr := readOutputLedger(contents)
+		if ledgerErr != nil {
+			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, ledgerErr
+		}
+		if ledger.CurrentFolderID != "" {
+			current = stampdrive.Item{ID: ledger.CurrentFolderID, Name: "Current", Folder: true}
+			ok = true
+		}
 	}
 	if !ok {
 		authorizer, supported := drive.(currentFolderAuthorizer)
@@ -190,10 +279,6 @@ func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampd
 		if err != nil {
 			return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, fmt.Errorf("connect the project’s Current folder: %w", err)
 		}
-	}
-	contents, err := drive.Download(ctx, canonical.ID)
-	if err != nil {
-		return stampdrive.Item{}, stampdrive.Item{}, stampdrive.Item{}, nil, err
 	}
 	return canonical, folder, current, contents, nil
 }
@@ -244,6 +329,9 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 	if err != nil {
 		return "", err
 	}
+	if err := validateRemoteProject(contents); err != nil {
+		return "", err
+	}
 	if dirty && mode == PullSafe {
 		return "", fmt.Errorf("Drive advanced from version %s to %s while local files changed; use pull --incoming or pull --replace", state.BaseVersion, remote.Version)
 	}
@@ -260,6 +348,14 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 		}
 		diagnostic.Log("collab", "pull.incoming", "destination", destination, "version", remote.Version)
 		return "Remote version expanded at " + destination, nil
+	}
+	ledger, err := readOutputLedger(contents)
+	if err != nil {
+		return "", err
+	}
+	ledger, err = authorizePublishedOutputs(ctx, drive, state.CurrentFolderID, ledger)
+	if err != nil {
+		return "", fmt.Errorf("connect newly published files before Pull: %w", err)
 	}
 	if dirty && mode == PullReplace {
 		recovery := filepath.Join(root, ".stamp", "recovery", time.Now().UTC().Format("20060102T150405Z")+".stamp")
@@ -281,16 +377,38 @@ func Pull(ctx context.Context, drive Drive, root string, mode PullMode) (string,
 	if err != nil {
 		return "", err
 	}
-	outputs, err := readOutputLedger(contents)
-	if err != nil {
-		return "", err
-	}
-	state.BaseVersion, state.BaseHash, state.Files, state.Outputs = remote.Version, hash(contents), hashes, outputs
+	state.BaseVersion, state.BaseHash, state.Files = remote.Version, hash(contents), hashes
+	state.Outputs, state.OutputFolders = ledger.Files, ledger.Folders
 	if err := project.WriteState(root, state); err != nil {
 		return "", err
 	}
 	diagnostic.Log("collab", "pull.complete", "version", remote.Version, "files", len(hashes))
 	return "Pulled Drive version " + remote.Version, nil
+}
+
+func validateRemoteProject(contents []byte) error {
+	temporary, err := unpackRemoteProject(contents)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(temporary)
+	_, err = project.Load(temporary)
+	if err != nil {
+		return fmt.Errorf("validate remote project: %w", err)
+	}
+	return nil
+}
+
+func unpackRemoteProject(contents []byte) (string, error) {
+	temporary, err := os.MkdirTemp("", "stamp-remote-")
+	if err != nil {
+		return "", err
+	}
+	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), temporary); err != nil {
+		os.RemoveAll(temporary)
+		return "", fmt.Errorf("validate remote project: %w", err)
+	}
+	return temporary, nil
 }
 
 func Push(ctx context.Context, drive Drive, root, message, forceLease string) (project.RemoteState, error) {
@@ -380,7 +498,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	}
 	resolved := map[string]stampdrive.Item{}
 	if !firstPush {
-		refs := outputRefs(outputFiles, state.Outputs)
+		refs := outputRefs(outputFiles, state.Outputs, state.OutputFolders, state.CurrentFolderID)
 		if len(refs) > 0 {
 			resolved, err = drive.ResolveFiles(ctx, state.CurrentFolderID, refs)
 			if err != nil {
@@ -393,7 +511,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 			}
 		}
 	}
-	state.Outputs, err = syncOutputs(ctx, drive, state.CurrentFolderID, outputFiles, state.Outputs, resolved, func(completed, total int, detail string) {
+	state.Outputs, state.OutputFolders, err = syncOutputs(ctx, drive, state.CurrentFolderID, outputFiles, state.Outputs, state.OutputFolders, resolved, func(completed, total int, detail string) {
 		percent := 55
 		if total > 0 {
 			percent += completed * 35 / total
@@ -405,9 +523,7 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	}
 	version := VersionInfo{Message: message, CreatedAt: time.Now().UTC().Format(time.RFC3339), ParentVersion: remoteVersion}
 	versionJSON, _ := json.MarshalIndent(version, "", "  ")
-	outputsJSON, _ := json.MarshalIndent(struct {
-		Files map[string]string `json:"files"`
-	}{Files: state.Outputs}, "", "  ")
+	outputsJSON, _ := json.MarshalIndent(outputLedger{Layout: 2, CurrentFolderID: state.CurrentFolderID, Files: state.Outputs, Folders: state.OutputFolders}, "", "  ")
 	var archive bytes.Buffer
 	report(PushProgress{Stage: "Packaging project", Percent: 92})
 	if err := bundle.PackWith(root, &archive, map[string][]byte{
@@ -487,34 +603,103 @@ func collectOutputs(root string, results []render.Result) (map[string]outputFile
 			return nil, err
 		}
 		key := filepath.ToSlash(rel)
-		files[key] = outputFile{Name: strings.ReplaceAll(key, "/", " - "), MIME: mimeFor(path), Data: data}
+		files[key] = outputFile{Name: filepath.Base(key), MIME: mimeFor(path), Data: data}
 	}
 	return files, nil
 }
 
-func outputRefs(current map[string]outputFile, ledger map[string]string) []stampdrive.FileRef {
+func outputRefs(current map[string]outputFile, ledger, folders map[string]string, currentFolderID string) []stampdrive.FileRef {
 	refs := make([]stampdrive.FileRef, 0, len(current)+len(ledger))
 	seen := map[string]bool{}
 	for key, file := range current {
 		// An empty ledger means this project predates output identities. Every
 		// existing mirror must be selected once; guessing would create duplicates.
 		if len(ledger) == 0 || ledger[key] != "" {
-			refs = append(refs, stampdrive.FileRef{Key: key, ID: ledger[key], Name: file.Name})
+			name := file.Name
+			folderID := folders[path.Dir(key)]
+			if folderID == "" {
+				folderID = currentFolderID
+				name = strings.ReplaceAll(key, "/", " - ")
+			}
+			refs = append(refs, stampdrive.FileRef{Key: key, ID: ledger[key], Name: name, FolderID: folderID})
 			seen[key] = true
 		}
 	}
 	for key, id := range ledger {
 		if !seen[key] {
-			refs = append(refs, stampdrive.FileRef{Key: key, ID: id, Name: strings.ReplaceAll(key, "/", " - ")})
+			name := path.Base(key)
+			folderID := folders[path.Dir(key)]
+			if folderID == "" {
+				folderID = currentFolderID
+				name = strings.ReplaceAll(key, "/", " - ")
+			}
+			refs = append(refs, stampdrive.FileRef{Key: key, ID: id, Name: name, FolderID: folderID})
 		}
 	}
 	return refs
 }
 
-func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[string]outputFile, previous map[string]string, resolved map[string]stampdrive.Item, progress func(completed, total int, detail string)) (map[string]string, error) {
+func folderRefs(folders map[string]string) []stampdrive.FolderRef {
+	refs := make([]stampdrive.FolderRef, 0, len(folders))
+	for folderPath, id := range folders {
+		refs = append(refs, stampdrive.FolderRef{Path: folderPath, ID: id})
+	}
+	return refs
+}
+
+func ensureOutputFolders(ctx context.Context, drive Drive, rootID string, files map[string]outputFile, previous map[string]string) (map[string]string, error) {
+	paths := map[string]bool{}
+	for key := range files {
+		for directory := path.Dir(key); directory != "."; directory = path.Dir(directory) {
+			paths[directory] = true
+		}
+	}
+	ordered := make([]string, 0, len(paths))
+	for directory := range paths {
+		ordered = append(ordered, directory)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return strings.Count(ordered[i], "/") < strings.Count(ordered[j], "/")
+	})
+	result := make(map[string]string, len(ordered))
+	for _, directory := range ordered {
+		parentID := rootID
+		if parent := path.Dir(directory); parent != "." {
+			parentID = result[parent]
+		}
+		if id := previous[directory]; id != "" {
+			item, err := drive.Get(ctx, id)
+			if err == nil && item.Folder && hasDriveParent(item, parentID) {
+				result[directory] = item.ID
+				continue
+			}
+		}
+		folder, err := drive.EnsureFolder(ctx, parentID, path.Base(directory), map[string]string{"stamp_kind": "output_folder", "stamp_path": directory})
+		if err != nil {
+			return nil, err
+		}
+		result[directory] = folder.ID
+	}
+	return result, nil
+}
+
+func hasDriveParent(item stampdrive.Item, parentID string) bool {
+	for _, id := range item.Parents {
+		if id == parentID {
+			return true
+		}
+	}
+	return false
+}
+
+func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[string]outputFile, previous, previousFolders map[string]string, resolved map[string]stampdrive.Item, progress func(completed, total int, detail string)) (map[string]string, map[string]string, error) {
 	diagnostic.Log("collab", "outputs.sync_start", "folder_id", folderID)
 	if folderID == "" {
-		return nil, errors.New("project has no Current folder")
+		return nil, nil, errors.New("project has no Current folder")
+	}
+	folders, err := ensureOutputFolders(ctx, drive, folderID, current, previousFolders)
+	if err != nil {
+		return nil, nil, err
 	}
 	next := make(map[string]string, len(current))
 	total := len(current)
@@ -529,11 +714,21 @@ func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[
 			progress(completed, total, key)
 		}
 		item, ok := resolved[key]
+		targetFolderID := folderID
+		if directory := path.Dir(key); directory != "." {
+			targetFolderID = folders[directory]
+		}
 		if ok {
+			if item.Name != file.Name || !hasDriveParent(item, targetFolderID) {
+				item, err = drive.MoveFile(ctx, item, targetFolderID, file.Name)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
 			diagnostic.Log("collab", "outputs.update", "path", key, "file_id", item.ID, "bytes", len(file.Data), "mime", file.MIME)
 			updated, err := drive.UpdateFile(ctx, item.ID, file.MIME, bytes.NewReader(file.Data))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if updated.ID == "" {
 				updated.ID = item.ID
@@ -541,9 +736,9 @@ func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[
 			next[key] = updated.ID
 		} else {
 			diagnostic.Log("collab", "outputs.create", "path", key, "bytes", len(file.Data), "mime", file.MIME)
-			created, err := drive.CreateFile(ctx, folderID, file.Name, file.MIME, bytes.NewReader(file.Data), map[string]string{"stamp_kind": "output", "stamp_path": key})
+			created, err := drive.CreateFile(ctx, targetFolderID, file.Name, file.MIME, bytes.NewReader(file.Data), map[string]string{"stamp_kind": "output", "stamp_path": key})
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			next[key] = created.ID
 		}
@@ -555,11 +750,11 @@ func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[
 		}
 		item, ok := resolved[key]
 		if !ok {
-			return nil, fmt.Errorf("published file %q was not authorized for deletion", key)
+			return nil, nil, fmt.Errorf("published file %q was not authorized for deletion", key)
 		}
 		diagnostic.Log("collab", "outputs.delete", "path", key, "file_id", item.ID)
 		if err := drive.Trash(ctx, item.ID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		completed++
 	}
@@ -567,33 +762,35 @@ func syncOutputs(ctx context.Context, drive Drive, folderID string, current map[
 		progress(completed, total, "")
 	}
 	diagnostic.Log("collab", "outputs.sync_complete", "files", len(current))
-	return next, nil
+	return next, folders, nil
 }
 
-func readOutputLedger(contents []byte) (map[string]string, error) {
+func readOutputLedger(contents []byte) (outputLedger, error) {
 	reader, err := zip.NewReader(bytes.NewReader(contents), int64(len(contents)))
 	if err != nil {
-		return nil, fmt.Errorf("read output identities: %w", err)
+		return outputLedger{}, fmt.Errorf("validate remote project: read output identities: %w", err)
 	}
+	inferred := outputLedger{Files: map[string]string{}}
 	for _, file := range reader.File {
+		if strings.HasPrefix(file.Name, "outputs/") && !file.FileInfo().IsDir() {
+			inferred.Files[strings.TrimPrefix(file.Name, "outputs/")] = ""
+		}
 		if file.Name != ".stamp/outputs.json" {
 			continue
 		}
 		stream, err := file.Open()
 		if err != nil {
-			return nil, err
+			return outputLedger{}, err
 		}
-		var ledger struct {
-			Files map[string]string `json:"files"`
-		}
+		var ledger outputLedger
 		err = json.NewDecoder(io.LimitReader(stream, 1<<20)).Decode(&ledger)
 		stream.Close()
 		if err != nil {
-			return nil, fmt.Errorf("read output identities: %w", err)
+			return outputLedger{}, fmt.Errorf("read output identities: %w", err)
 		}
-		return ledger.Files, nil
+		return ledger, nil
 	}
-	return nil, nil
+	return inferred, nil
 }
 
 func replaceWorkspace(root string, contents []byte) error {

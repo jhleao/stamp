@@ -33,6 +33,7 @@ type RemoteState struct {
 	WebURL          string            `json:"webUrl,omitempty"`
 	Files           map[string]string `json:"files,omitempty"`
 	Outputs         map[string]string `json:"outputs,omitempty"`
+	OutputFolders   map[string]string `json:"outputFolders,omitempty"`
 }
 
 type ProjectStatus struct {

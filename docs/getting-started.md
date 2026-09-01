@@ -40,13 +40,14 @@ Share the project folder in Google Drive. A colleague checks it out with:
 ```sh
 stamp login
 stamp clone board-pack
-# Choose the project's .stamp file in Google Picker.
+# Follow the permission checklist for the .stamp archive and published files.
 cd board-pack
 stamp studio
 ```
 
 Pull refuses to replace local edits when Drive also changed. Push uses an exact
 Drive revision lease and refuses to overwrite a newer shared version.
-The first Push may ask you to connect the generated files already in `Current`.
-Select all files shown. Stamp verifies the exact set before it writes and then
-remembers their Drive identities in the shared project.
+Clone verifies every existing published file before creating the workspace.
+Stamp remembers those Drive identities, so normal Pull and Push operations do
+not repeat the setup. If a teammate publishes a new output later, the next Pull
+asks only for access to that new item.
