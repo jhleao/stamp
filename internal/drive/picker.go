@@ -216,6 +216,7 @@ func pickerHTML(accessToken, developerKey string, request pickerRequest) string 
 		required = []FileRef{}
 	}
 	requiredJSON, _ := json.Marshal(required)
+	requiredIDsJSON, _ := json.Marshal(knownFileIDs(required))
 	introJSON, _ := json.Marshal(request.intro)
 	return `<!doctype html>
 <meta charset="utf-8">
@@ -251,6 +252,7 @@ const folders = ` + string(foldersJSON) + `;
 const mime = ` + string(mimeJSON) + `;
 const parent = ` + string(parentJSON) + `;
 const required = ` + string(requiredJSON) + `;
+const requiredIDs = ` + string(requiredIDsJSON) + `;
 const configuredIntro = ` + string(introJSON) + `;
 document.getElementById('prompt').textContent = prompt;
 const migration = required.length > 0;
@@ -278,7 +280,8 @@ function openPicker() {
         .setMode(google.picker.DocsViewMode.LIST)
     : new google.picker.DocsView(google.picker.ViewId.DOCS)
         .setMimeTypes(mime).setMode(google.picker.DocsViewMode.LIST);
-  if (parent) view.setParent(parent);
+  if (requiredIDs.length > 0) view.setFileIds(requiredIDs.join(','));
+  else if (parent) view.setParent(parent);
   const builder = new google.picker.PickerBuilder()
     .addView(view).setOAuthToken(token).setDeveloperKey(developerKey)
     .setAppId('` + pickerAppID + `').setTitle(title);
@@ -311,4 +314,15 @@ gapi.load('picker', () => {
   choose.addEventListener('click', openPicker);
 });
 </script>`
+}
+
+func knownFileIDs(refs []FileRef) []string {
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.ID == "" {
+			return []string{}
+		}
+		ids = append(ids, ref.ID)
+	}
+	return ids
 }
