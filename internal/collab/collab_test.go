@@ -41,6 +41,18 @@ func (f *fakeDrive) UpdateNamedFile(context.Context, string, string, string, io.
 func (f *fakeDrive) Children(context.Context, string) ([]stampdrive.Item, error) { return nil, nil }
 func (f *fakeDrive) Trash(context.Context, string) error                         { return nil }
 func (f *fakeDrive) Retain(context.Context, stampdrive.Item) error               { return nil }
+func (f *fakeDrive) MoveFile(_ context.Context, item stampdrive.Item, parentID, name string) (stampdrive.Item, error) {
+	item.Name = name
+	item.Parents = []string{parentID}
+	return item, nil
+}
+func (f *fakeDrive) ResolveFolders(_ context.Context, _ string, refs []stampdrive.FolderRef) (map[string]stampdrive.Item, error) {
+	items := make(map[string]stampdrive.Item, len(refs))
+	for _, ref := range refs {
+		items[ref.Path] = stampdrive.Item{ID: ref.ID, Name: filepath.Base(ref.Path), Folder: true, CanEdit: true}
+	}
+	return items, nil
+}
 func (f *fakeDrive) ResolveFiles(_ context.Context, _ string, refs []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
 	items := make(map[string]stampdrive.Item, len(refs))
 	for _, ref := range refs {
@@ -58,6 +70,12 @@ type recordingDrive struct {
 	uploaded []byte
 }
 
+type hierarchyDrive struct {
+	recordingDrive
+	folders []string
+	moves   []string
+}
+
 type blockedOutputDrive struct {
 	fakeDrive
 	writes int
@@ -68,6 +86,7 @@ type projectDrive struct {
 	data              []byte
 	hideCurrent       bool
 	currentAuthorized bool
+	resolveErr        error
 }
 
 func (f *projectDrive) Get(_ context.Context, id string) (stampdrive.Item, error) {
@@ -104,8 +123,25 @@ func (f *projectDrive) Trash(context.Context, string) error { return errors.New(
 func (f *projectDrive) Retain(context.Context, stampdrive.Item) error {
 	return errors.New("unexpected write")
 }
-func (f *projectDrive) ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
-	return nil, errors.New("unexpected write")
+func (f *projectDrive) MoveFile(context.Context, stampdrive.Item, string, string) (stampdrive.Item, error) {
+	return stampdrive.Item{}, errors.New("unexpected write")
+}
+func (f *projectDrive) ResolveFolders(context.Context, string, []stampdrive.FolderRef) (map[string]stampdrive.Item, error) {
+	return map[string]stampdrive.Item{}, nil
+}
+func (f *projectDrive) ResolveFiles(_ context.Context, _ string, refs []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
+	if f.resolveErr != nil {
+		return nil, f.resolveErr
+	}
+	items := make(map[string]stampdrive.Item, len(refs))
+	for _, ref := range refs {
+		id := ref.ID
+		if id == "" {
+			id = "selected-" + ref.Key
+		}
+		items[ref.Key] = stampdrive.Item{ID: id, Name: ref.Name, CanEdit: true}
+	}
+	return items, nil
 }
 
 func (f *blockedOutputDrive) ResolveFiles(context.Context, string, []stampdrive.FileRef) (map[string]stampdrive.Item, error) {
@@ -134,6 +170,18 @@ func (f *recordingDrive) UpdateNamedFile(_ context.Context, _ string, _ string, 
 	}
 	f.uploaded = data
 	return stampdrive.Item{ID: "canonical", Version: "3"}, nil
+}
+
+func (f *hierarchyDrive) EnsureFolder(_ context.Context, parentID, name string, _ map[string]string) (stampdrive.Item, error) {
+	id := parentID + "/" + name
+	f.folders = append(f.folders, id)
+	return stampdrive.Item{ID: id, Name: name, Folder: true, CanEdit: true, Parents: []string{parentID}}, nil
+}
+
+func (f *hierarchyDrive) MoveFile(_ context.Context, item stampdrive.Item, parentID, name string) (stampdrive.Item, error) {
+	f.moves = append(f.moves, parentID+"/"+name)
+	item.Name, item.Parents = name, []string{parentID}
+	return item, nil
 }
 
 func pullFixture(t *testing.T) (string, *fakeDrive) {
@@ -214,6 +262,69 @@ func TestRemoteStateForRequiresSameProjectAndDoesNotChangeLocalFiles(t *testing.
 	drive.data = archive.Bytes()
 	if _, err := RemoteStateFor(context.Background(), drive, root, "canonical"); err == nil || !strings.Contains(err.Error(), "is not this workspace") {
 		t.Fatalf("expected project identity refusal, got %v", err)
+	}
+}
+
+func TestCloneRequiresPublishedFileAuthorizationBeforeCreatingWorkspace(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote")
+	if _, err := project.Create(remote, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := bundle.PackWith(remote, &archive, map[string][]byte{
+		".stamp/outputs.json": []byte("{\"files\":{\"documents/brief.pdf\":\"published-pdf\"}}\n"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drive := &projectDrive{
+		items: map[string]stampdrive.Item{
+			"canonical": {ID: "canonical", Name: "Shared.stamp", CanEdit: true, Version: "7", Parents: []string{"project"}},
+			"project":   {ID: "project", Folder: true, CanEdit: true},
+			"current":   {ID: "current", Name: "Current", Folder: true, CanEdit: true},
+		},
+		data:       archive.Bytes(),
+		resolveErr: errors.New("published file permission denied"),
+	}
+	destination := filepath.Join(t.TempDir(), "clone")
+	if _, err := Open(context.Background(), drive, "canonical", destination); err == nil || !strings.Contains(err.Error(), "connect published files before cloning") {
+		t.Fatalf("expected clone authorization refusal, got %v", err)
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("clone created local workspace before authorization completed: %v", err)
+	}
+}
+
+func TestCloneRecordsAuthorizedLegacyOutputIdentities(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote")
+	if _, err := project.Create(remote, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(remote, "outputs", "documents", "brief.pdf")
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(output, []byte("pdf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := bundle.Pack(remote, &archive); err != nil {
+		t.Fatal(err)
+	}
+	drive := &projectDrive{
+		items: map[string]stampdrive.Item{
+			"canonical": {ID: "canonical", Name: "Shared.stamp", CanEdit: true, Version: "7", Parents: []string{"project"}},
+			"project":   {ID: "project", Folder: true, CanEdit: true},
+			"current":   {ID: "current", Name: "Current", Folder: true, CanEdit: true},
+		},
+		data: archive.Bytes(),
+	}
+	destination := filepath.Join(t.TempDir(), "clone")
+	workspace, err := Open(context.Background(), drive, "canonical", destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := workspace.State.Outputs["documents/brief.pdf"]; got != "selected-documents/brief.pdf" {
+		t.Fatalf("authorized output identity = %q", got)
 	}
 }
 
@@ -400,5 +511,46 @@ func TestPushDoesNotWriteWhenCanonicalOutputsAreNotAuthorized(t *testing.T) {
 	}
 	if drive.writes != 0 {
 		t.Fatalf("push made %d Drive writes before output authorization", drive.writes)
+	}
+}
+
+func TestPushMigratesPublishedOutputsIntoTheirProjectHierarchy(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "local")
+	if _, err := project.Create(root, "Shared"); err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := project.FileHashes(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "documents/security/brief.pdf"
+	if err := project.WriteState(root, project.RemoteState{
+		FileID: "canonical", ProjectFolderID: "project", CurrentFolderID: "current",
+		BaseVersion: "2", Files: hashes, Outputs: map[string]string{key: "published-pdf"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drive := &hierarchyDrive{recordingDrive: recordingDrive{fakeDrive: fakeDrive{item: stampdrive.Item{ID: "canonical", Version: "2"}}}}
+	state, err := push(context.Background(), drive, root, "root", "migrate", "", func(string) ([]render.Result, error) {
+		output := filepath.Join(root, "outputs", filepath.FromSlash(key))
+		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(output, []byte("pdf"), 0o644); err != nil {
+			return nil, err
+		}
+		return []render.Result{{Source: "documents/security/brief.page.md", Output: "outputs/" + key}}, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(drive.folders, ","); got != "current/documents,current/documents/security" {
+		t.Fatalf("created folder hierarchy = %q", got)
+	}
+	if got := strings.Join(drive.moves, ","); got != "current/documents/security/brief.pdf" {
+		t.Fatalf("moved published file = %q", got)
+	}
+	if state.OutputFolders["documents"] != "current/documents" || state.OutputFolders["documents/security"] != "current/documents/security" {
+		t.Fatalf("folder ledger = %#v", state.OutputFolders)
 	}
 }
