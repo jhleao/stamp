@@ -13,8 +13,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -67,9 +69,15 @@ type Item struct {
 // FileRef describes a canonical published file. ID is empty only while an
 // older project is being upgraded to the output identity ledger.
 type FileRef struct {
-	Key  string `json:"key"`
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name"`
+	Key      string `json:"key"`
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name"`
+	FolderID string `json:"folderId,omitempty"`
+}
+
+type FolderRef struct {
+	Path string `json:"path"`
+	ID   string `json:"id"`
 }
 
 // ResolveFiles verifies access to canonical published files and opens one
@@ -92,35 +100,52 @@ func (c *Client) ResolveFiles(ctx context.Context, folderID string, refs []FileR
 	if len(missing) == 0 {
 		return resolved, nil
 	}
-	files, err := pickFiles(ctx, pickerRequest{
-		title:    fmt.Sprintf("Select all %d published files, then click Select", len(missing)),
-		prompt:   fmt.Sprintf("Select all %d published files. Stamp verifies every file before Push.", len(missing)),
-		mime:     "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-		parent:   folderID,
-		required: missing,
-	})
-	if err != nil {
-		return nil, err
-	}
+	groups := map[string][]FileRef{}
 	for _, ref := range missing {
-		var selected *pickedFile
-		for i := range files {
-			if (ref.ID != "" && files[i].ID == ref.ID) || (ref.ID == "" && files[i].Name == ref.Name) {
-				selected = &files[i]
-				break
-			}
+		parent := ref.FolderID
+		if parent == "" {
+			parent = folderID
 		}
-		if selected == nil {
-			return nil, fmt.Errorf("published file %q was not selected", ref.Name)
-		}
-		item, err := c.Get(ctx, selected.ID)
+		groups[parent] = append(groups[parent], ref)
+	}
+	parents := make([]string, 0, len(groups))
+	for parent := range groups {
+		parents = append(parents, parent)
+	}
+	sort.Strings(parents)
+	for _, parent := range parents {
+		refs := groups[parent]
+		sort.Slice(refs, func(i, j int) bool { return refs[i].Key < refs[j].Key })
+		files, err := pickFiles(ctx, pickerRequest{
+			title:    fmt.Sprintf("Select all %d published files, then click Select", len(refs)),
+			prompt:   fmt.Sprintf("Select all %d published files. Stamp verifies every file before continuing.", len(refs)),
+			mime:     "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			parent:   parent,
+			required: refs,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("authorize %q: %w", ref.Name, err)
+			return nil, err
 		}
-		if !item.CanEdit {
-			return nil, fmt.Errorf("published file %q is read-only; ask its owner for Editor access", ref.Name)
+		for _, ref := range refs {
+			var selected *pickedFile
+			for i := range files {
+				if (ref.ID != "" && files[i].ID == ref.ID) || (ref.ID == "" && files[i].Name == ref.Name) {
+					selected = &files[i]
+					break
+				}
+			}
+			if selected == nil {
+				return nil, fmt.Errorf("published file %q was not selected", ref.Name)
+			}
+			item, err := c.Get(ctx, selected.ID)
+			if err != nil {
+				return nil, fmt.Errorf("authorize %q: %w", ref.Name, err)
+			}
+			if !item.CanEdit {
+				return nil, fmt.Errorf("published file %q is read-only; ask its owner for Editor access", ref.Name)
+			}
+			resolved[ref.Key] = item
 		}
-		resolved[ref.Key] = item
 	}
 	return resolved, nil
 }
@@ -437,6 +462,64 @@ func (c *Client) AuthorizeCurrentFolder(ctx context.Context, projectFolder Item)
 		return Item{}, errors.New("the selected Current folder is read-only; ask its owner for Editor access")
 	}
 	return item, nil
+}
+
+// ResolveFolders authorizes an existing published folder tree from its root
+// down, so every subsequent file Picker can open directly in the right folder.
+func (c *Client) ResolveFolders(ctx context.Context, currentFolderID string, refs []FolderRef) (map[string]Item, error) {
+	resolved := make(map[string]Item, len(refs))
+	sort.Slice(refs, func(i, j int) bool {
+		left, right := strings.Count(refs[i].Path, "/"), strings.Count(refs[j].Path, "/")
+		if left == right {
+			return refs[i].Path < refs[j].Path
+		}
+		return left < right
+	})
+	for _, ref := range refs {
+		parentPath := path.Dir(ref.Path)
+		parentID := currentFolderID
+		if parentPath != "." {
+			parent, ok := resolved[parentPath]
+			if !ok {
+				return nil, fmt.Errorf("published folder %q has no authorized parent", ref.Path)
+			}
+			parentID = parent.ID
+		}
+		name := path.Base(ref.Path)
+		item, err := c.Get(ctx, ref.ID)
+		if err == nil && item.Folder && item.Name == name && hasParent(item, parentID) && item.CanEdit {
+			resolved[ref.Path] = item
+			continue
+		}
+		id, err := PickPublishedFolder(ctx, parentID, name)
+		if err != nil {
+			return nil, err
+		}
+		item, err = c.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !item.Folder || item.Name != name || !hasParent(item, parentID) {
+			return nil, fmt.Errorf("selected folder is not the project’s %q folder", ref.Path)
+		}
+		if !item.CanEdit {
+			return nil, fmt.Errorf("published folder %q is read-only; ask its owner for Editor access", ref.Path)
+		}
+		resolved[ref.Path] = item
+	}
+	return resolved, nil
+}
+
+func (c *Client) MoveFile(ctx context.Context, item Item, parentID, name string) (Item, error) {
+	call := c.api.Files.Update(item.ID, &drive.File{Name: name}).SupportsAllDrives(true).AddParents(parentID)
+	if len(item.Parents) > 0 {
+		call = call.RemoveParents(strings.Join(item.Parents, ","))
+	}
+	file, err := call.Fields(fileFields).Context(ctx).Do()
+	if err != nil {
+		return Item{}, err
+	}
+	return toItem(file), nil
 }
 
 func hasParent(item Item, parentID string) bool {
