@@ -72,8 +72,10 @@ type recordingDrive struct {
 
 type hierarchyDrive struct {
 	recordingDrive
-	folders []string
-	moves   []string
+	folders           []string
+	moves             []string
+	authorizedFolders []stampdrive.FolderRef
+	authorizedFiles   []stampdrive.FileRef
 }
 
 type blockedOutputDrive struct {
@@ -182,6 +184,12 @@ func (f *hierarchyDrive) MoveFile(_ context.Context, item stampdrive.Item, paren
 	f.moves = append(f.moves, parentID+"/"+name)
 	item.Name, item.Parents = name, []string{parentID}
 	return item, nil
+}
+
+func (f *hierarchyDrive) AuthorizeProjectItems(_ context.Context, folders []stampdrive.FolderRef, files []stampdrive.FileRef) error {
+	f.authorizedFolders = append([]stampdrive.FolderRef(nil), folders...)
+	f.authorizedFiles = append([]stampdrive.FileRef(nil), files...)
+	return nil
 }
 
 func pullFixture(t *testing.T) (string, *fakeDrive) {
@@ -552,5 +560,11 @@ func TestPushMigratesPublishedOutputsIntoTheirProjectHierarchy(t *testing.T) {
 	}
 	if state.OutputFolders["documents"] != "current/documents" || state.OutputFolders["documents/security"] != "current/documents/security" {
 		t.Fatalf("folder ledger = %#v", state.OutputFolders)
+	}
+	if len(drive.authorizedFolders) != 1 || drive.authorizedFolders[0].ID != "current" {
+		t.Fatalf("authorized folders = %#v", drive.authorizedFolders)
+	}
+	if len(drive.authorizedFiles) != 1 || drive.authorizedFiles[0].ID != "published-pdf" {
+		t.Fatalf("authorized files = %#v", drive.authorizedFiles)
 	}
 }

@@ -168,14 +168,8 @@ type outputLedger struct {
 
 func authorizePublishedOutputs(ctx context.Context, drive Drive, currentFolderID string, ledger outputLedger) (outputLedger, error) {
 	fileRefs := outputRefs(nil, ledger.Files, ledger.Folders, currentFolderID)
-	if authorizer, ok := drive.(projectItemAuthorizer); ok {
-		folders := folderRefs(ledger.Folders)
-		if currentFolderID != "" {
-			folders = append([]stampdrive.FolderRef{{Path: ".", ID: currentFolderID}}, folders...)
-		}
-		if err := authorizer.AuthorizeProjectItems(ctx, folders, fileRefs); err != nil {
-			return outputLedger{}, err
-		}
+	if err := authorizeKnownOutputs(ctx, drive, currentFolderID, ledger.Folders, fileRefs); err != nil {
+		return outputLedger{}, err
 	}
 	folders, err := drive.ResolveFolders(ctx, currentFolderID, folderRefs(ledger.Folders))
 	if err != nil {
@@ -216,6 +210,18 @@ func authorizePublishedOutputs(ctx context.Context, drive Drive, currentFolderID
 		ledger.Files[ref.Key] = item.ID
 	}
 	return ledger, nil
+}
+
+func authorizeKnownOutputs(ctx context.Context, drive Drive, currentFolderID string, outputFolders map[string]string, files []stampdrive.FileRef) error {
+	authorizer, ok := drive.(projectItemAuthorizer)
+	if !ok {
+		return nil
+	}
+	folders := folderRefs(outputFolders)
+	if currentFolderID != "" {
+		folders = append([]stampdrive.FolderRef{{Path: ".", ID: currentFolderID}}, folders...)
+	}
+	return authorizer.AuthorizeProjectItems(ctx, folders, files)
 }
 
 func inspectDriveProject(ctx context.Context, drive Drive, value string) (stampdrive.Item, stampdrive.Item, stampdrive.Item, []byte, error) {
@@ -498,6 +504,10 @@ func push(ctx context.Context, drive Drive, root, parentID, message, forceLease 
 	}
 	resolved := map[string]stampdrive.Item{}
 	if !firstPush {
+		known := outputRefs(nil, state.Outputs, state.OutputFolders, state.CurrentFolderID)
+		if err := authorizeKnownOutputs(ctx, drive, state.CurrentFolderID, state.OutputFolders, known); err != nil {
+			return project.RemoteState{}, fmt.Errorf("connect published files before Push: %w", err)
+		}
 		refs := outputRefs(outputFiles, state.Outputs, state.OutputFolders, state.CurrentFolderID)
 		if len(refs) > 0 {
 			resolved, err = drive.ResolveFiles(ctx, state.CurrentFolderID, refs)
