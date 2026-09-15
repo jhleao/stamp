@@ -25,6 +25,7 @@ type Manifest struct {
 }
 
 type RemoteState struct {
+	Provider        string            `json:"provider,omitempty"`
 	FileID          string            `json:"fileId,omitempty"`
 	ProjectFolderID string            `json:"projectFolderId,omitempty"`
 	CurrentFolderID string            `json:"currentFolderId,omitempty"`
@@ -458,8 +459,9 @@ This workspace is a shared document pack. Keep the loop small:
    established visual language and test both sparse and dense content.
 6. Run ` + "`stamp push --message update-summary`" + ` only when the person asks to share.
 
-If asked to change which Google Drive project a workspace uses, run
-` + "`stamp remote set`" + `. Select the target .stamp archive; never edit
+If asked to change which remote project a workspace uses, run
+` + "`stamp remote set`" + `. For Drive, select the target .stamp archive. For Notion, add
+--backend notion --notion-page with the target project page URL. Never edit
 .stamp/state.json by hand. Stamp verifies that it is the same logical project
 and preserves all local files.
 
