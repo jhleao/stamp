@@ -81,7 +81,7 @@ func PageName(page Object) string {
 
 // Create makes a dedicated subtree. It never adopts or wipes an existing page.
 func (c *Client) Create(ctx context.Context, parent, name string) (Snapshot, error) {
-	page, err := c.CreatePage(ctx, parent, name, []Object{marker("project v1")}, "🔖")
+	page, err := c.CreatePage(ctx, parent, name, []Object{projectIntro(name)}, "🔖")
 	if err != nil {
 		return Snapshot{}, err
 	}
