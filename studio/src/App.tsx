@@ -391,7 +391,10 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
   };
   return <aside class="flex min-w-0 flex-col bg-rail">
     <header class="drive-identity">
-      {sync.value?.provider === "notion" ? <img class="drive-mark" src={notionLogo} alt="" aria-hidden="true" /> : <DriveMark />}
+      {!sync.value ? <svg class="drive-mark backend-loading" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9" opacity=".2" />
+        <path d="M12 3a9 9 0 0 1 9 9" stroke-linecap="round" />
+      </svg> : sync.value.provider === "notion" ? <img class="drive-mark" src={notionLogo} alt="" aria-hidden="true" /> : <DriveMark />}
       <div class="drive-copy">
         <div class="drive-project-row">
           <strong class="drive-project">{sync.value?.driveName || project.value?.project.name || "Opening project…"}</strong>
