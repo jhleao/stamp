@@ -12,6 +12,7 @@ import { PdfPreview } from "./PdfPreview";
 import { ComponentPreview } from "./ComponentPreview";
 import { syncActions } from "./sync-policy";
 import { agentPrompt } from "./agent-prompt";
+import notionLogo from "./assets/notion-logo.svg";
 
 const syncLabels = {
   "local-only": "Local only",
@@ -259,7 +260,7 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
   onMoveFiles: (paths: string[], destination: string) => Promise<Record<string, string> | null>;
 }) {
   const syncState = sync.value?.state;
-  const backend = "Google Drive";
+  const backend = sync.value?.provider === "notion" ? "Notion" : sync.value ? "Google Drive" : "remote";
   const [refreshing, setRefreshing] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ target: TreeContextTarget; x: number; y: number } | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -390,7 +391,10 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
   };
   return <aside class="flex min-w-0 flex-col bg-rail">
     <header class="drive-identity">
-      <DriveMark />
+      {!sync.value ? <svg class="drive-mark backend-loading" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9" opacity=".2" />
+        <path d="M12 3a9 9 0 0 1 9 9" stroke-linecap="round" />
+      </svg> : sync.value.provider === "notion" ? <img class="drive-mark" src={notionLogo} alt="" aria-hidden="true" /> : <DriveMark />}
       <div class="drive-copy">
         <div class="drive-project-row">
           <strong class="drive-project">{sync.value?.driveName || project.value?.project.name || "Opening project…"}</strong>
@@ -593,7 +597,7 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
   const message = useRef<HTMLInputElement>(null);
   const confirmation = useRef<HTMLInputElement>(null);
   const diverged = sync.value?.state === "diverged";
-  const backend = "Google Drive";
+  const backend = sync.value?.provider === "notion" ? "Notion" : sync.value ? "Google Drive" : "remote";
   return <dialog ref={dialog} class="stamp-dialog" onCancel={(event) => { if (pushProgress.value) event.preventDefault(); }} onClose={(event) => event.currentTarget.querySelector("form")?.reset()}>
     <form method="dialog" class="p-6">
       <span class="dialog-kicker">Push to {backend}</span>
@@ -602,7 +606,7 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
       <div class="sync-facts">
         <SyncFact label="Destination" value={sync.value?.driveName || project.value?.project.name || `New ${backend} project`} />
         <SyncFact label="Local" value={sync.value?.localChanged ? "Changes ready" : "No changes"} />
-        <SyncFact label={backend} value={sync.value?.remoteChanged ? `Changed since local v${sync.value?.baseVersion || "—"}` : `Current · v${sync.value?.baseVersion || "—"}`} attention={Boolean(sync.value?.remoteChanged)} />
+        <SyncFact label={backend} value={sync.value?.remoteChanged ? `Changed since local v${sync.value?.baseVersion?.slice(0, 12) || "—"}` : `Current · v${sync.value?.baseVersion?.slice(0, 12) || "—"}`} attention={Boolean(sync.value?.remoteChanged)} />
       </div>
       <div class="change-reviews">
         <ChangeReview title="Local changes to publish" changes={syncReview.value?.local} empty="No file changes found." />
@@ -613,6 +617,7 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
         `PDFs and other generated outputs are rebuilt and mirrored to ${backend}.`,
         `The previous ${backend} revision remains recoverable through Stamp's source history.`,
       ]} />
+      {sync.value?.provider === "notion" && <p>Rendered pages update individually. If pushes overlap, Stamp preserves the archives and may ask you to repair the rendered pages.</p>}
       {pushProgress.value && <div class="push-progress" role="status" aria-live="polite">
         <div><strong>{pushProgress.value.stage}</strong><span>{pushProgress.value.percent}%</span></div>
         <progress max="100" value={pushProgress.value.percent} />
@@ -632,14 +637,14 @@ function PushDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialog
 function PullDialog({ dialog, onConfirm }: { dialog: preact.RefObject<HTMLDialogElement>; onConfirm: () => void }) {
   const confirmation = useRef<HTMLInputElement>(null);
   const localChanged = Boolean(sync.value?.localChanged);
-  const backend = "Google Drive";
+  const backend = sync.value?.provider === "notion" ? "Notion" : sync.value ? "Google Drive" : "remote";
   return <dialog ref={dialog} class="stamp-dialog" onClose={(event) => event.currentTarget.querySelector("form")?.reset()}><form method="dialog" class="p-6">
     <span class="dialog-kicker">Pull from {backend}</span>
     <h2>Replace this local workspace?</h2>
     <p>The {backend} version becomes your working copy. Stamp saves a recovery copy before replacing any local changes.</p>
     <div class="sync-facts">
       <SyncFact label="Source" value={sync.value?.driveName || project.value?.project.name || backend} />
-      <SyncFact label={backend} value={`Newer than local v${sync.value?.baseVersion || "—"}`} attention />
+      <SyncFact label={backend} value={`Newer than local v${sync.value?.baseVersion?.slice(0, 12) || "—"}`} attention />
       <SyncFact label="Local" value={localChanged ? "Changes moved to recovery" : "No changes to preserve"} />
     </div>
     <div class="change-reviews">
@@ -970,7 +975,7 @@ export function App() {
     try {
       sync.value = await api.sync();
       connected.value = true;
-      showNotice("Google Drive status refreshed");
+      showNotice("Remote status refreshed");
     } catch (error) {
       connected.value = false;
       showNotice((error as Error).message, true);

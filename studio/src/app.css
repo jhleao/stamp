@@ -96,6 +96,7 @@ button:disabled { cursor: default; opacity: .3; }
 .sync-status.sync-diverged::before { background: var(--warning); }
 .sync-refresh { display: grid; width: 17px; height: 17px; margin-top: 2px; flex: none; place-items: center; background: transparent; color: var(--faint); }
 .sync-refresh:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.backend-loading { animation: sync-refresh-spin .8s linear infinite; }
 .sync-refresh.is-refreshing svg { animation: sync-refresh-spin .65s linear infinite; }
 @keyframes sync-refresh-spin { to { transform: rotate(360deg); } }
 .sync-button {
