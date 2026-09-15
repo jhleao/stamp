@@ -25,7 +25,6 @@ import (
 	"github.com/jhleao/stamp/internal/bundle"
 	"github.com/jhleao/stamp/internal/collab"
 	"github.com/jhleao/stamp/internal/diagnostic"
-	stampdrive "github.com/jhleao/stamp/internal/drive"
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/theme"
@@ -297,21 +296,21 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, classifySync(state, status, ""))
 		return
 	}
-	drive, err := stampdrive.New(r.Context())
+	drive, err := collab.ConnectWorkspace(r.Context(), s.root)
 	if err != nil {
 		s.writeJSON(w, unavailableSync(state, status, err))
 		return
 	}
-	remote, err := drive.Get(r.Context(), state.FileID)
+	remoteVersion, err := drive.Version(r.Context(), state.FileID)
 	if err != nil {
 		s.writeJSON(w, unavailableSync(state, status, err))
 		return
 	}
-	s.writeJSON(w, classifySync(state, status, remote.Version))
+	s.writeJSON(w, classifySync(state, status, remoteVersion))
 }
 
 func classifySync(state project.RemoteState, status project.ProjectStatus, remoteVersion string) syncStatus {
-	identity := syncStatus{Provider: "drive", DriveName: status.Name, DriveURL: state.WebURL, BaseVersion: state.BaseVersion}
+	identity := syncStatus{Provider: remoteProvider(state), DriveName: status.Name, DriveURL: state.WebURL, BaseVersion: state.BaseVersion}
 	if state.FileID == "" {
 		identity.State, identity.LocalChanged, identity.FirstPush = "local-only", true, true
 		return identity
@@ -334,7 +333,7 @@ func classifySync(state project.RemoteState, status project.ProjectStatus, remot
 }
 
 func unavailableSync(state project.RemoteState, status project.ProjectStatus, err error) syncStatus {
-	return syncStatus{State: "unavailable", LocalChanged: status.Dirty, DriveName: status.Name, DriveURL: state.WebURL, BaseVersion: state.BaseVersion, Message: err.Error()}
+	return syncStatus{Provider: remoteProvider(state), State: "unavailable", LocalChanged: status.Dirty, DriveName: status.Name, DriveURL: state.WebURL, BaseVersion: state.BaseVersion, Message: err.Error()}
 }
 
 func (s *Server) syncDetails(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +352,7 @@ func (s *Server) syncDetails(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, result)
 		return
 	}
-	drive, err := stampdrive.New(r.Context())
+	drive, err := collab.ConnectWorkspace(r.Context(), s.root)
 	if err != nil {
 		s.writeError(w, err, http.StatusUnauthorized)
 		return
@@ -370,7 +369,7 @@ func (s *Server) syncDetails(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(staging)
 	if err := bundle.UnpackReader(bytes.NewReader(contents), int64(len(contents)), staging); err != nil {
-		s.writeError(w, fmt.Errorf("inspect Drive project: %w", err), http.StatusUnprocessableEntity)
+		s.writeError(w, fmt.Errorf("inspect remote project: %w", err), http.StatusUnprocessableEntity)
 		return
 	}
 	remote, err := project.FileHashes(staging)
@@ -836,10 +835,10 @@ func (s *Server) pull(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = collab.PullSafe
 	}
-	drive, err := stampdrive.New(r.Context())
+	drive, err := collab.ConnectWorkspace(r.Context(), s.root)
 	if err == nil {
 		var message string
-		message, err = collab.Pull(r.Context(), drive, s.root, mode)
+		message, err = drive.Pull(r.Context(), s.root, mode)
 		if err == nil {
 			s.broadcast("change")
 			s.writeJSON(w, map[string]any{"ok": true, "message": message})
@@ -855,12 +854,12 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	drive, err := stampdrive.New(r.Context())
+	drive, err := collab.ConnectWorkspace(r.Context(), s.root)
 	if err != nil {
 		s.writeError(w, err, http.StatusUnauthorized)
 		return
 	}
-	state, err := collab.PushWithProgress(r.Context(), drive, s.root, request.Message, request.Force, func(progress collab.PushProgress) {
+	state, err := drive.Push(r.Context(), s.root, request.Message, request.Force, func(progress collab.PushProgress) {
 		s.broadcastJSON("push-progress", progress)
 	})
 	if err != nil {
@@ -868,7 +867,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.broadcast("change")
-	s.writeJSON(w, map[string]any{"ok": true, "message": "Pushed Drive version " + state.BaseVersion, "state": state})
+	s.writeJSON(w, map[string]any{"ok": true, "message": "Pushed remote version " + state.BaseVersion, "state": state})
 }
 
 func (s *Server) createComponent(w http.ResponseWriter, r *http.Request) {
@@ -1153,4 +1152,11 @@ func token() string {
 	data := make([]byte, 24)
 	_, _ = rand.Read(data)
 	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func remoteProvider(state project.RemoteState) string {
+	if state.Provider == "" {
+		return "drive"
+	}
+	return state.Provider
 }

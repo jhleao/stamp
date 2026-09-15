@@ -6,7 +6,10 @@ Run the built-in walkthrough at any time:
 stamp tutorial
 ```
 
-The complete first-time path is:
+For a Notion project, use `stamp setup notion`: it saves your token in macOS
+Keychain and guides you through creating or cloning a project. See [Notion setup](notion.md).
+
+The Google Drive first-time path is:
 
 ```sh
 brew install jhleao/tap/stamp
