@@ -12,6 +12,7 @@ import { PdfPreview } from "./PdfPreview";
 import { ComponentPreview } from "./ComponentPreview";
 import { syncActions } from "./sync-policy";
 import { agentPrompt } from "./agent-prompt";
+import notionLogo from "./assets/notion-logo.svg";
 
 const syncLabels = {
   "local-only": "Local only",
@@ -390,7 +391,7 @@ function Sidebar({ onSelect, onSectionChange, onCreateComponent, onPush, onPull,
   };
   return <aside class="flex min-w-0 flex-col bg-rail">
     <header class="drive-identity">
-      {sync.value?.provider === "notion" ? <span class="drive-mark" aria-hidden="true">N</span> : <DriveMark />}
+      {sync.value?.provider === "notion" ? <img class="drive-mark" src={notionLogo} alt="" aria-hidden="true" /> : <DriveMark />}
       <div class="drive-copy">
         <div class="drive-project-row">
           <strong class="drive-project">{sync.value?.driveName || project.value?.project.name || "Opening project…"}</strong>
