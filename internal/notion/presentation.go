@@ -16,6 +16,11 @@ import (
 const detailsTitle = "Stamp details"
 const projectFileTitle = "Project File"
 
+func projectIntro(name string) Object {
+	text := name + " is a Stamp project. Stamp helps you leverage AI to generate in-brand documents from your knowledge base. Browse the published files below or see the How To section for how to work with Stamp."
+	return Object{"object": "block", "type": "paragraph", "paragraph": Object{"rich_text": Text(text), "color": "gray"}}
+}
+
 func description(kind string) string {
 	switch kind {
 	case "project v1":
@@ -139,7 +144,11 @@ func (c *Client) Style(ctx context.Context, s Snapshot) (Snapshot, error) {
 		}
 		for _, child := range children {
 			if isMarker(child, item.kind) {
-				if _, err = c.UpdateBlock(ctx, String(child, "id"), Object{"paragraph": marker(item.kind)["paragraph"]}); err != nil {
+				intro := marker(item.kind)
+				if item.kind == "project v1" {
+					intro = projectIntro(s.Name)
+				}
+				if _, err = c.UpdateBlock(ctx, String(child, "id"), Object{"paragraph": intro["paragraph"]}); err != nil {
 					return s, err
 				}
 			}
