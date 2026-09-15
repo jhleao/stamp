@@ -30,7 +30,7 @@ example, and the `+` beside Components creates a new shared primitive.
 - DOC.MD, FODP, FODS, and XLSX render to a cached PDF through the compatibility
   tools.
 - FODS and XLSX conversions are serialized while LibreOffice works.
-- A push always performs the exact PDF/XLSX build before touching Drive.
+- A push always performs the exact PDF/XLSX build before publishing to the remote.
 
 Template examples live under `theme/examples/` and behave exactly like project
 documents. Refreshing an HTML template, component, or Tailwind theme renders its

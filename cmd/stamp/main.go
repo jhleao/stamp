@@ -17,6 +17,7 @@ import (
 	"github.com/jhleao/stamp/internal/diagnostic"
 	"github.com/jhleao/stamp/internal/doctor"
 	stampdrive "github.com/jhleao/stamp/internal/drive"
+	"github.com/jhleao/stamp/internal/notion"
 	"github.com/jhleao/stamp/internal/project"
 	"github.com/jhleao/stamp/internal/render"
 	"github.com/jhleao/stamp/internal/studio"
@@ -81,13 +82,9 @@ func run(args []string) error {
 	}
 	switch args[0] {
 	case "login":
-		message, err := stampdrive.Login(context.Background())
-		if err == nil {
-			fmt.Println(message)
-		}
-		return err
+		return loginCommand(args[1:])
 	case "logout":
-		return stampdrive.Logout()
+		return logoutCommand(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -148,7 +145,7 @@ func run(args []string) error {
 
 const tutorial = `# Stamp quickstart
 
-Stamp keeps a document project in Google Drive and opens a local Studio where
+Stamp keeps a document project in Google Drive or Notion and opens a local Studio where
 you can edit its content, components, and visual theme.
 
 ## 1. Set up this computer
@@ -157,6 +154,8 @@ you can edit its content, components, and visual theme.
 
 Stamp checks the authoring tools, offers to install anything missing, connects
 Google Drive, and guides you into creating or cloning a project.
+For Notion, run ` + "`stamp setup notion`" + ` instead. It saves a personal token
+in macOS Keychain and guides you through the Notion project setup.
 Release builds also support ` + "`stamp update`" + ` and notify you when a newer
 version is available.
 
@@ -218,8 +217,9 @@ New projects also contain AGENTS.md and CLAUDE.md instructions.
 `
 
 func setupCommand(args []string) error {
-	if len(args) != 0 {
-		return errors.New("usage: stamp setup")
+	provider, err := authProvider(args, "setup")
+	if err != nil {
+		return err
 	}
 	if !isTerminal(os.Stdin) {
 		return errors.New("setup is interactive; run it in a terminal")
@@ -245,6 +245,16 @@ func setupCommand(args []string) error {
 		if err := doctor.InstallMissing(context.Background(), os.Stdout); err != nil {
 			return err
 		}
+	}
+	if provider == "notion" {
+		if _, err := notion.New(context.Background()); err != nil {
+			if err := loginCommand([]string{"notion"}); err != nil {
+				return err
+			}
+		} else {
+			fmt.Println("Notion connected.")
+		}
+		return setupNotionProject(reader)
 	}
 	if err := doctorCommand(nil); err != nil {
 		return err
@@ -359,7 +369,7 @@ func isTerminal(file *os.File) bool {
 }
 
 func newCommand(args []string) error {
-	pos, opts, flags, err := parseArgs(args, []string{"name"}, []string{"choose-drive-folder"})
+	pos, opts, flags, err := parseArgs(args, []string{"name", "backend", "notion-page"}, []string{"choose-drive-folder"})
 	if err != nil {
 		return err
 	}
@@ -370,11 +380,17 @@ func newCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
+	drive, err := collab.Connect(context.Background(), opts["backend"])
 	if err != nil {
-		return fmt.Errorf("connect Google Drive: %w", err)
+		return fmt.Errorf("connect remote: %w", err)
 	}
-	parentID := "root"
+	parentID := defaultString(opts["notion-page"], "root")
+	if opts["notion-page"] != "" && opts["backend"] != "notion" {
+		return errors.New("--notion-page requires --backend notion")
+	}
+	if flags["choose-drive-folder"] && opts["backend"] == "notion" {
+		return errors.New("use --notion-page with Notion")
+	}
 	if flags["choose-drive-folder"] {
 		parentID, err = stampdrive.PickDestinationFolder(context.Background())
 		if err != nil {
@@ -385,9 +401,9 @@ func newCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	state, err := collab.Create(context.Background(), drive, dir, parentID)
+	state, err := drive.Create(context.Background(), dir, parentID)
 	if err != nil {
-		return fmt.Errorf("created %s locally, but could not create its Drive project: %w", dir, err)
+		return fmt.Errorf("created %s locally, but could not create its remote project: %w", dir, err)
 	}
 	rememberProject(dir)
 	fmt.Printf("Created %s\n%s\n%s\n", manifest.Name, dir, state.WebURL)
@@ -395,27 +411,45 @@ func newCommand(args []string) error {
 }
 
 func cloneCommand(args []string) error {
-	if len(args) > 1 {
-		return errors.New("usage: stamp clone [directory]")
+	pos, opts, _, err := parseArgs(args, []string{"backend", "notion-page"}, nil)
+	if err != nil {
+		return err
+	}
+	if len(pos) > 1 {
+		return errors.New("usage: stamp clone [directory] [--backend notion --notion-page <URL>]")
 	}
 	destination := ""
-	if len(args) == 1 {
-		destination = args[0]
+	if len(pos) == 1 {
+		destination = pos[0]
 	}
-	id, err := stampdrive.PickProjectArchive(context.Background())
+	provider := opts["backend"]
+	if provider != "" && provider != "drive" && provider != "notion" {
+		return fmt.Errorf("unknown remote provider %q", provider)
+	}
+	id := opts["notion-page"]
+	if provider == "notion" {
+		if id == "" {
+			return errors.New("provide --notion-page with the Stamp project page URL")
+		}
+	} else {
+		if id != "" {
+			return errors.New("--notion-page requires --backend notion")
+		}
+		id, err = stampdrive.PickProjectArchive(context.Background())
+		if err != nil {
+			return err
+		}
+	}
+	remote, err := collab.Connect(context.Background(), provider)
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
-	if err != nil {
-		return err
-	}
-	workspace, err := collab.Open(context.Background(), drive, id, destination)
+	workspace, err := remote.Open(context.Background(), id, destination)
 	if err != nil {
 		return err
 	}
 	rememberProject(workspace.Root)
-	fmt.Printf("Cloned Drive version %s\n", workspace.State.BaseVersion)
+	fmt.Printf("Cloned remote version %s\n", workspace.State.BaseVersion)
 	return nil
 }
 
@@ -430,15 +464,38 @@ func remoteCommand(args []string) error {
 			return err
 		}
 		if state.WebURL == "" {
-			return errors.New("workspace has no Google Drive remote")
+			return errors.New("workspace has no remote")
 		}
 		fmt.Println(state.WebURL)
+		return nil
+	}
+	if args[0] == "create" {
+		pos, opts, _, err := parseArgs(args[1:], []string{"dir", "backend", "notion-page"}, nil)
+		if err != nil {
+			return err
+		}
+		if len(pos) != 0 || opts["backend"] != "notion" {
+			return errors.New("usage: stamp remote create --backend notion [--notion-page <parent URL>] [--dir <directory>]")
+		}
+		root, err := project.FindRoot(defaultString(opts["dir"], "."))
+		if err != nil {
+			return err
+		}
+		remote, err := collab.Connect(context.Background(), "notion")
+		if err != nil {
+			return err
+		}
+		state, err := remote.CreateNotionCopy(context.Background(), root, opts["notion-page"])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Created and connected Notion remote\n%s\n", state.WebURL)
 		return nil
 	}
 	if args[0] != "set" {
 		return errors.New("usage: stamp remote [set [--dir <directory>] [--yes]]")
 	}
-	pos, opts, flags, err := parseArgs(args[1:], []string{"dir"}, []string{"yes"})
+	pos, opts, flags, err := parseArgs(args[1:], []string{"dir", "backend", "notion-page"}, []string{"yes"})
 	if err != nil {
 		return err
 	}
@@ -453,15 +510,29 @@ func remoteCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	id, err := stampdrive.PickRemoteArchive(context.Background())
+	provider := defaultString(opts["backend"], oldState.Provider)
+	if provider != "" && provider != "drive" && provider != "notion" {
+		return fmt.Errorf("unknown remote provider %q", provider)
+	}
+	id := opts["notion-page"]
+	if provider == "notion" {
+		if id == "" {
+			return errors.New("provide --notion-page with the target Stamp project URL")
+		}
+	} else {
+		if id != "" {
+			return errors.New("--notion-page requires --backend notion")
+		}
+		id, err = stampdrive.PickRemoteArchive(context.Background())
+	}
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
+	drive, err := collab.Connect(context.Background(), provider)
 	if err != nil {
 		return err
 	}
-	newState, err := collab.RemoteStateFor(context.Background(), drive, root, id)
+	newState, err := drive.StateFor(context.Background(), root, id)
 	if err != nil {
 		return err
 	}
@@ -539,11 +610,11 @@ func pullCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
+	drive, err := collab.ConnectWorkspace(context.Background(), root)
 	if err != nil {
 		return err
 	}
-	message, err := collab.Pull(context.Background(), drive, root, mode)
+	message, err := drive.Pull(context.Background(), root, mode)
 	if err == nil {
 		fmt.Println(message)
 	}
@@ -562,15 +633,15 @@ func pushCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	drive, err := stampdrive.New(context.Background())
+	drive, err := collab.ConnectWorkspace(context.Background(), root)
 	if err != nil {
 		return err
 	}
-	state, err := collab.Push(context.Background(), drive, root, opts["message"], opts["force-with-lease"])
+	state, err := drive.Push(context.Background(), root, opts["message"], opts["force-with-lease"], nil)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Pushed Drive version %s\n%s\n", state.BaseVersion, state.WebURL)
+	fmt.Printf("Pushed remote version %s\n%s\n", state.BaseVersion, state.WebURL)
 	return nil
 }
 
@@ -726,11 +797,13 @@ func usage() {
 
 Usage:
 	stamp [--verbose] <command>
-  stamp setup
-  stamp login | logout
+  stamp setup [drive|notion]
+  stamp login [drive|notion] | logout [drive|notion]
   stamp new <directory> [--name <name>] [--choose-drive-folder]
-  stamp clone [directory]
-  stamp remote [set [--dir <directory>] [--yes]]
+  stamp new <directory> --backend notion [--notion-page <parent URL>]
+  stamp clone [directory] [--backend notion --notion-page <URL>]
+  stamp remote [set [--dir <directory>] [--backend notion --notion-page <URL>] [--yes]]
+  stamp remote create --backend notion [--notion-page <parent URL>] [--dir <directory>]
   stamp pull [--incoming|--replace]
   stamp push [--message <text>] [--force-with-lease <version>]
   stamp studio [--dir <directory>] [--no-open]
