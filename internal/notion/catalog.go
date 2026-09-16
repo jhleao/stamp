@@ -49,13 +49,14 @@ func (c *Client) readCatalog(ctx context.Context, s Snapshot) (catalog, error) {
 		return catalog{}, err
 	}
 	parent, _ := block["parent"].(map[string]any)
-	validParent := hasParent(block, s.CurrentID)
+	validParent := parent["page_id"] == s.CurrentID
 	if toggleID, ok := parent["block_id"].(string); ok {
 		toggle, err := c.Block(ctx, toggleID)
 		if err != nil {
 			return catalog{}, err
 		}
-		validParent = validParent || (hasParent(toggle, s.CurrentID) && isDetails(toggle))
+		owner, _ := toggle["parent"].(map[string]any)
+		validParent = owner["page_id"] == s.CurrentID && isDetails(toggle)
 	}
 	if !validParent || caption(block) != "Stamp output catalog" {
 		return catalog{}, errors.New("Stamp output catalog was moved or changed")
@@ -108,7 +109,8 @@ func (c *Client) verifyCatalog(ctx context.Context, s Snapshot) (catalog, error)
 		if err != nil {
 			return result, err
 		}
-		if !hasParent(block, file.PageID) || caption(block) != "stamp-output:"+key {
+		p, _ := block["parent"].(map[string]any)
+		if p["page_id"] != file.PageID || caption(block) != "stamp-output:"+key {
 			return result, errors.New("managed Notion attachment was moved or changed")
 		}
 	}

@@ -252,17 +252,3 @@ versions. Archives without version metadata use “Project version” and the No
 upload time. Revision hashes and parent links live in a collapsed **Details**
 toggle below each download. Older caption-based records remain readable; migration
 writes the hidden record before clearing its caption, preserving archive IDs.
-
-### Published file tree
-
-Published files now live in a **Published files** toggle on the project page.
-Folder toggles mirror the output directories; each file toggle contains its PDF
-viewer or downloadable spreadsheet. Existing toggle titles and attachment IDs
-are preserved on subsequent pushes.
-
-Older child-page libraries migrate on the next push. Stamp builds and verifies
-the replacement before switching the project metadata and archiving the old
-library. If the old library contains additional user content, migration stops
-so those notes can be preserved. Existing project archives and version history
-remain separate from the presentation tree. Use a current Stamp version on all
-collaborators’ computers before working with a migrated project.
