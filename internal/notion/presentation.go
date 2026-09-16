@@ -131,6 +131,19 @@ func (c *Client) appendDetails(ctx context.Context, page string, child Object, t
 // Style upgrades the first bare layout while preserving page, PDF, and archive
 // identities. Subsequent pushes don't restyle existing pages or overwrite icons.
 func (c *Client) Style(ctx context.Context, s Snapshot) (Snapshot, error) {
+	current, err := c.Block(ctx, s.CurrentID)
+	if err != nil {
+		return s, err
+	}
+	if String(current, "type") == "toggle" {
+		if err := c.Preflight(ctx, s); err != nil {
+			return s, err
+		}
+		if err := c.StyleHistory(ctx, s); err != nil {
+			return s, err
+		}
+		return c.Inspect(ctx, s.PageID)
+	}
 	if err := c.Preflight(ctx, s); err != nil {
 		return s, err
 	}
