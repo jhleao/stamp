@@ -86,7 +86,7 @@ func (c *Client) Create(ctx context.Context, parent, name string) (Snapshot, err
 		return Snapshot{}, err
 	}
 	s := Snapshot{PageID: String(page, "id"), Name: name, URL: String(page, "url")}
-	current, err := c.CreatePage(ctx, s.PageID, "Published files", []Object{marker("renders v1")}, "📂")
+	current, err := c.createToggle(ctx, s.PageID, "📂 Published files", nil)
 	if err != nil {
 		return s, err
 	}
@@ -354,15 +354,14 @@ func (c *Client) Commit(ctx context.Context, s Snapshot, data []byte) (Revision,
 	return r, nil
 }
 func (c *Client) verifyParent(ctx context.Context, id, parent string) error {
-	page, err := c.Page(ctx, id)
+	page, err := c.Block(ctx, id)
 	if err != nil {
 		return err
 	}
 	if trash, _ := page["in_trash"].(bool); trash {
 		return errors.New("managed Notion page is in trash; restore it before syncing")
 	}
-	p, _ := page["parent"].(map[string]any)
-	if p["page_id"] != parent {
+	if !hasParent(page, parent) {
 		return errors.New("managed Notion page was moved outside its expected parent")
 	}
 	return nil
@@ -371,6 +370,21 @@ func (c *Client) verifyParent(ctx context.Context, id, parent string) error {
 // Publish touches only the attachment identified by a Stamp caption. User
 // notes and other attachments are left intact. Removed outputs are archived.
 func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) error {
+	current, err := c.Block(ctx, s.CurrentID)
+	if err != nil {
+		return err
+	}
+	if String(current, "type") == "child_page" {
+		latest, err := c.Inspect(ctx, s.PageID)
+		if err != nil {
+			return err
+		}
+		return c.migrateTree(ctx, latest, outputs)
+	}
+	return c.publishTree(ctx, s, outputs)
+}
+
+func (c *Client) publishTree(ctx context.Context, s Snapshot, outputs []Output) error {
 	inventory, err := c.verifyCatalog(ctx, s)
 	if err != nil {
 		return err
@@ -389,7 +403,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 			return err
 		}
 		for _, b := range children {
-			if String(b, "type") != "child_page" {
+			if String(b, "type") != "toggle" {
 				continue
 			}
 			pageID := String(b, "id")
@@ -413,8 +427,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 				}
 			}
 			if !managed {
-				cp, _ := b["child_page"].(map[string]any)
-				name, _ := cp["title"].(string)
+				name := toggleTitle(b)
 				// Only descend into folders carrying our explicit ownership marker.
 				for _, child := range blocks {
 					if isMarker(child, "folder v1") {
@@ -448,7 +461,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 		if err != nil {
 			return "", err
 		}
-		p, err := c.CreatePage(ctx, parent, path.Base(key), []Object{marker("folder v1")})
+		p, err := c.createToggle(ctx, parent, path.Base(key), []Object{marker("folder v1")})
 		if err != nil {
 			return "", err
 		}
@@ -480,7 +493,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 			if err != nil {
 				return err
 			}
-			page, err := c.CreatePage(ctx, parent, documentTitle(path.Base(output.Path)), []Object{block})
+			page, err := c.createToggle(ctx, parent, documentTitle(path.Base(output.Path)), []Object{block})
 			if err != nil {
 				return err
 			}
@@ -505,7 +518,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 		return err
 	}
 	for _, old := range existing {
-		if err := c.TrashPage(ctx, old.PageID); err != nil {
+		if err := c.trashBlock(ctx, old.PageID); err != nil {
 			return err
 		}
 	}
@@ -548,7 +561,7 @@ func (c *Client) Publish(ctx context.Context, s Snapshot, outputs []Output) erro
 		if err := c.writeCatalog(ctx, s, next, folders); err != nil {
 			return err
 		}
-		if err := c.TrashPage(ctx, id); err != nil {
+		if err := c.trashBlock(ctx, id); err != nil {
 			return err
 		}
 	}
