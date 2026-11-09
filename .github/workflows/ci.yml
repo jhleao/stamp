@@ -38,7 +38,12 @@ jobs:
       - name: Build Studio
         run: npm run build:studio
 
+      - name: Install PDF verification tools
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Test
+        env:
+          STAMP_CHROME: /opt/google/chrome/chrome
         run: |
           npm run test:studio
           go test ./...
