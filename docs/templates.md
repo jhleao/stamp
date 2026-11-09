@@ -101,6 +101,15 @@ local data. Components may use other
 components, and may emit inline SVG for diagrams and charts. CSS supports the
 browser's full print, grid, flex, SVG, and paged-media layout system.
 
+PDF export automatically flattens the visual paint layer of pages using
+shadows, gradients, masks, filters, or translucent groups into opaque 300 dpi
+backgrounds. Ordinary text and links remain native PDF content; text affected
+by masks, filters, or group opacity is baked into the background with its
+effects. Pages without complex effects retain their vector graphics. This
+avoids shadow and transparency artifacts in macOS Preview without requiring
+project scripts, generated assets, or component annotations. Backgrounds are
+regenerated during every render for written pages and decks.
+
 The authoring model is intentionally Preact-like—named components, props,
 children, conditions, and nested composition—but the output stays portable,
 reviewable, and safe to share through Drive.

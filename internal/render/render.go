@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/yuin/goldmark"
@@ -779,6 +780,7 @@ func (printer *chromePrinter) Print(htmlPath, outputPath, kind string) error {
 	var pdf []byte
 	var paginationError string
 	actions := []chromedp.Action{
+		emulation.SetEmulatedMedia().WithMedia("print"),
 		chromedp.Navigate((&url.URL{Scheme: "file", Path: filepath.ToSlash(htmlPath)}).String()),
 		chromedp.Poll(`document.fonts.status === "loaded"`, nil, chromedp.WithPollingTimeout(60*time.Second)),
 	}
@@ -789,6 +791,7 @@ func (printer *chromePrinter) Print(htmlPath, outputPath, kind string) error {
 		)
 	}
 	actions = append(actions,
+		chromedp.ActionFunc(flattenPrintLayers),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
 			pdf, _, err = page.PrintToPDF().
